@@ -2,7 +2,7 @@ import { Command, LogOut, Mail, Menu, ShieldCheck, User as UserIcon, UserPlus } 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { requestMessageFocusAfterNavigation } from '../../lib/messageFocus';
-import { getThemePreference, setThemePreference, ThemePreference } from '../../lib/theme';
+import { setThemePreference, useThemePreference } from '../../lib/theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../pages/workspace/WorkspaceContext';
 import { useWorkspaces } from '../../pages/workspace/WorkspacesProvider';
@@ -39,12 +39,10 @@ export const Header = ({
   const currentWorkspace = useWorkspaces().getWorkspace(workspaceId);
   const canInvite = !!currentWorkspace?.capabilities?.canManageInvitations;
   const navigate = useNavigate();
-  // P2 Phase J: light / dark / follow the system (per browser).
-  const [themePref, setThemePref] = useState<ThemePreference>(() => getThemePreference());
-  const chooseTheme = (preference: ThemePreference) => {
-    setThemePreference(preference);
-    setThemePref(preference);
-  };
+  // P2 Phase J: light / dark / follow the system (per browser). Read from
+  // lib/theme so a choice made in another switcher shows here too.
+  const themePref = useThemePreference();
+  const chooseTheme = setThemePreference;
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);

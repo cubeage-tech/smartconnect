@@ -2,6 +2,7 @@ import { Building2, ClipboardList, Hash, HardDrive, LayoutDashboard, LogOut, Mes
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { BrandMark } from '../ui/Brand';
+import { ThemeSwitcher } from '../ui/ThemeSwitcher';
 import { AdminDashboard } from './AdminDashboard';
 import { AuditLogViewer } from './AuditLogViewer';
 import { ChannelManagement } from './ChannelManagement';
@@ -111,6 +112,8 @@ export const AdminLayout = () => {
         </nav>
 
         <div className="shrink-0 border-t border-line p-2">
+          <p className="px-2.5 pb-1.5 pt-1 text-[11px] font-medium text-fg-subtle" aria-hidden="true">Appearance</p>
+          <ThemeSwitcher size="sm" className="mb-2" />
           <button
             type="button"
             onClick={logout}
@@ -122,14 +125,22 @@ export const AdminLayout = () => {
       </aside>
 
       {/* Top bar (phones and small tablets) */}
-      <div className="shrink-0 border-b border-line bg-surface md:hidden">
-        <div className="flex h-12 items-center justify-between px-3">
-          <span className="flex items-center gap-2">
+      <header className="shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)] md:hidden">
+        <div className="flex h-12 items-center gap-2 px-3">
+          <span className="flex min-w-0 flex-1 items-center gap-2">
             <BrandMark size={22} />
-            <span className="text-sm font-semibold">Administration</span>
+            <span className="truncate text-sm font-semibold">Administration</span>
           </span>
-          <button type="button" onClick={logout} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-danger hover:bg-danger-soft">
-            <LogOut size={14} aria-hidden="true" /> Sign out
+          <ThemeSwitcher size="sm" iconOnly className="shrink-0" />
+          {/* Icon only on the narrowest phones (under 360px) so the theme fits beside it. */}
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Sign out"
+            title="Sign out"
+            className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-danger hover:bg-danger-soft"
+          >
+            <LogOut size={14} aria-hidden="true" /> <span className="max-[359px]:hidden">Sign out</span>
           </button>
         </div>
         <nav aria-label="Administration" className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2">
@@ -145,7 +156,7 @@ export const AdminLayout = () => {
             </button>
           ))}
         </nav>
-      </div>
+      </header>
 
       {/* Content */}
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">

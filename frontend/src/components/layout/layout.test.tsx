@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import axios from 'axios';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageFocusTarget, onMessageFocus } from '../../lib/messageFocus';
+import { setThemePreference } from '../../lib/theme';
 import { ProjectsPage } from '../../pages/projects/ProjectsPage';
 import { ChannelSearch } from './ChannelSearch';
 import { Header } from './Header';
@@ -109,6 +110,17 @@ describe('Header', () => {
     render(<MemoryRouter><Header /></MemoryRouter>);
     fireEvent.click(screen.getByText('AN'));
     expect(screen.queryByText(/@example\.com/)).not.toBeInTheDocument();
+  });
+
+  it('account-menu theme buttons show a choice made in another switcher', () => {
+    render(<MemoryRouter><Header /></MemoryRouter>);
+    fireEvent.click(screen.getByText('AN'));
+    act(() => void setThemePreference('dark')); // e.g. the phone's More tab
+    expect(screen.getByRole('button', { name: 'dark' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'system' })).toHaveAttribute('aria-pressed', 'false');
+    act(() => void setThemePreference('system'));
+    localStorage.clear();
+    document.documentElement.classList.remove('dark');
   });
 });
 

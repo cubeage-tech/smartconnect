@@ -1,19 +1,12 @@
-import { ArrowLeftRight, ClipboardList, LogOut, Monitor, Moon, Sun } from 'lucide-react';
-import { useState } from 'react';
+import { ArrowLeftRight, ClipboardList, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { MoreView } from '../../components/layout/MoreView';
 import { Avatar } from '../../components/ui/Avatar';
+import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
 import { useAuth } from '../../contexts/AuthContext';
-import { getThemePreference, setThemePreference, ThemePreference } from '../../lib/theme';
 import { openNavigationDrawer } from './ChatsPage';
 import { useWorkspace } from './WorkspaceContext';
 import { useWorkspaces } from './WorkspacesProvider';
-
-const THEMES: { id: ThemePreference; label: string; icon: typeof Sun }[] = [
-  { id: 'light', label: 'Light', icon: Sun },
-  { id: 'dark', label: 'Dark', icon: Moon },
-  { id: 'system', label: 'System', icon: Monitor },
-];
 
 /**
  * T.39 — the phone's "More" tab: who is signed in, appearance, switching
@@ -24,7 +17,6 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
   const { user, logout } = useAuth();
   const { workspaceId } = useWorkspace();
   const workspace = useWorkspaces().getWorkspace(workspaceId);
-  const [theme, setTheme] = useState<ThemePreference>(() => getThemePreference());
   const leads = !!workspace && !workspace.isDefault && !!workspace.capabilities?.canManage;
   const row = 'flex min-h-12 w-full select-none items-center gap-3 px-4 text-left text-[15px] text-fg active:bg-surface-tertiary';
   return (
@@ -40,23 +32,7 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
         <h2 id="more-appearance" className="mb-2 px-1 text-xs font-semibold uppercase tracking-wider text-fg-subtle">
           Appearance
         </h2>
-        <div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-1 rounded-xl bg-surface-secondary p-1">
-          {THEMES.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="radio"
-              aria-checked={theme === t.id}
-              onClick={() => {
-                setThemePreference(t.id);
-                setTheme(t.id);
-              }}
-              className={`flex min-h-10 items-center justify-center gap-1.5 rounded-lg text-sm font-medium transition-colors ${theme === t.id ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted'}`}
-            >
-              <t.icon size={15} aria-hidden="true" /> {t.label}
-            </button>
-          ))}
-        </div>
+        <ThemeSwitcher />
       </section>
       <div className="overflow-hidden rounded-2xl border border-line">
         <button type="button" className={row} onClick={openNavigationDrawer}>

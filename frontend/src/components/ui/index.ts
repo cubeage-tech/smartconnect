@@ -15,3 +15,4 @@ export { panelId, tabId, TabPanel, Tabs } from './Tabs';
 export type { TabItem } from './Tabs';
 export { invitationText, OneTimeCredentialsModal } from './OneTimeCredentialsModal';
 export { BottomSheet, SheetAction } from './BottomSheet';
+export { ThemeSwitcher } from './ThemeSwitcher';

@@ -1,5 +1,6 @@
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyTheme, getThemePreference, resolveTheme, setThemePreference, subscribeTheme, THEME_STORAGE_KEY, watchSystemTheme } from './theme';
+import { applyTheme, getThemePreference, resolveTheme, setThemePreference, subscribeTheme, THEME_STORAGE_KEY, useThemePreference, watchSystemTheme } from './theme';
 
 const mockSystemDark = (dark: boolean) => {
   const listeners = new Set<() => void>();
@@ -78,5 +79,30 @@ describe('theme preference (P2 Phase J)', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true);
     get.mockRestore();
     set.mockRestore();
+  });
+});
+
+describe('useThemePreference — the one source every switcher reads', () => {
+  it('re-renders on every change, even when the colours on screen stay the same', () => {
+    mockSystemDark(true);
+    const { result } = renderHook(() => useThemePreference());
+    expect(result.current).toBe('system');
+    act(() => void setThemePreference('dark')); // "system" on a dark OS → "dark": same colours, new choice
+    expect(result.current).toBe('dark');
+    act(() => void setThemePreference('system'));
+    expect(result.current).toBe('system');
+  });
+
+  it('follows a choice saved in another tab', () => {
+    mockSystemDark(false);
+    const unwatch = watchSystemTheme();
+    const { result } = renderHook(() => useThemePreference());
+    act(() => {
+      localStorage.setItem(THEME_STORAGE_KEY, 'dark'); // what the other tab wrote
+      window.dispatchEvent(new StorageEvent('storage', { key: THEME_STORAGE_KEY, newValue: 'dark' }));
+    });
+    expect(result.current).toBe('dark');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    unwatch();
   });
 });

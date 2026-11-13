@@ -59,19 +59,36 @@ export const applyTheme = (): ResolvedTheme => {
   return theme;
 };
 
-/** Re-applies the theme when the OS setting changes while on "system". Returns a cleanup. */
+// The saved choice changed (here or in another tab) — every switcher re-reads it.
+const preferenceListeners = new Set<() => void>();
+const notifyPreference = () => preferenceListeners.forEach((fn) => fn());
+
+/**
+ * Re-applies the theme when the OS setting changes while on "system", and when
+ * another tab saves a new choice. Returns a cleanup.
+ */
 export const watchSystemTheme = (): (() => void) => {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== THEME_STORAGE_KEY && event.key !== null) return;
+    applyTheme();
+    notifyPreference();
+  };
+  window.addEventListener('storage', onStorage);
+  const stopStorage = () => window.removeEventListener('storage', onStorage);
   try {
-    if (typeof matchMedia !== 'function') return () => undefined;
+    if (typeof matchMedia !== 'function') return stopStorage;
     const mql = matchMedia('(prefers-color-scheme: dark)');
     const onChange = () => {
       if (getThemePreference() === 'system') applyTheme();
     };
     mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
+    return () => {
+      mql.removeEventListener('change', onChange);
+      stopStorage();
+    };
   } catch {
     // No media-query support: explicit choices still work.
-    return () => undefined;
+    return stopStorage;
   }
 };
 
@@ -83,8 +100,23 @@ export const setThemePreference = (preference: ThemePreference) => {
   } catch {
     // Not persisted (private mode) — still applied for this page.
   }
-  return applyTheme();
+  const theme = applyTheme();
+  notifyPreference();
+  return theme;
 };
+
+/**
+ * The saved choice — "light", "dark" or "system" — re-rendering wherever it is
+ * changed. Every theme switcher reads this instead of keeping its own copy.
+ */
+export const useThemePreference = (): ThemePreference => useSyncExternalStore(subscribePreference, getThemePreference, () => 'system');
+
+function subscribePreference(onChange: () => void) {
+  preferenceListeners.add(onChange);
+  return () => {
+    preferenceListeners.delete(onChange);
+  };
+}
 
 /** Returns an unsubscribe function. */
 export const subscribeTheme = (fn: (theme: ResolvedTheme) => void) => {
