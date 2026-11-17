@@ -54,7 +54,7 @@ frontend/playwright-report/
 
 # Stage 1B (T.30) — private, generated and secret material that must never be uploaded
 # Private audit record: kept local by the owner's decision.
-/entireanalysis.md
+
 # Stale generated Prisma client (unused; the app imports @prisma/client). Ignoring does
 # not untrack it — the release stage runs `git rm -r --cached backend/lib/generated`.
 backend/lib/generated/
