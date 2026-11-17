@@ -3,11 +3,15 @@ import { http, seg } from './http';
 /**
  * Workspace invitations, invite links and join requests (Batch 3/E,
  * lib/policy 'workspace.manageInvitations'). Per-email invitation TOKENS are
- * never surfaced: the manager list endpoint doesn't return them, and the
- * create response's token is dropped here before it reaches any component.
+ * never listed: the manager list endpoint doesn't return them, and the
+ * create response's raw `token` field is dropped here. The one exception is
+ * deliberate: the inviter gets the invitation's shareable `inviteLink` once,
+ * at creation, to send when no e-mail goes out. The link grants nothing by
+ * itself — signing up needs that exact address, and accepting needs that
+ * account's own session.
  */
 
-export type InvitationState = 'pending' | 'accepted' | 'expired' | 'revoked';
+export type InvitationState = 'pending' | 'accepted' | 'declined' | 'expired' | 'revoked';
 
 export interface WorkspaceInvitation {
   id: string;
@@ -30,6 +34,21 @@ export interface InviteResult {
   emailSent: boolean;
   /** T.36: true when no e-mail could be sent because this server has no e-mail provider. */
   emailUnavailable?: true;
+  /** The invitation's own link, for the inviter to share (sign-up for that address, or accept/decline in the app). */
+  inviteLink?: string;
+  /** True when the address already has an account: they also see the invitation in the app. */
+  existingAccount?: boolean;
+  /** True when an invitation for this address was already pending — it is returned instead of a new one. */
+  duplicate?: true;
+}
+
+/** An invitation addressed to the signed-in account (GET /api/invitations/received). Never carries a token. */
+export interface ReceivedInvitation {
+  id: string;
+  workspace: { id: string; name: string };
+  inviter: { id: string; username: string; displayName: string | null };
+  createdAt: string;
+  expiresAt: string;
 }
 
 /** GET /api/workspaces/:id/invitations — newest first, state computed server-side, no tokens. */
@@ -38,16 +57,40 @@ export const listWorkspaceInvitations = (workspaceId: string) =>
 
 /** POST /api/workspaces/:id/invites { email } */
 export const inviteByEmail = async (workspaceId: string, email: string): Promise<InviteResult> => {
-  const body = await http.post<{ id: string; token?: string; emailError?: string; emailSent?: boolean; emailUnavailable?: boolean }>(
-    `/api/workspaces/${seg(workspaceId)}/invites`,
-    { email }
-  );
-  // Deliberately NOT returning body.token (single-use credential) or the raw
-  // provider error text. T.36: the server's own emailSent wins (older servers
-  // only reported failures through emailError).
+  const body = await http.post<{
+    id: string;
+    token?: string;
+    emailError?: string;
+    emailSent?: boolean;
+    emailUnavailable?: boolean;
+    inviteLink?: string;
+    existingAccount?: boolean;
+    duplicate?: boolean;
+  }>(`/api/workspaces/${seg(workspaceId)}/invites`, { email });
+  // Deliberately NOT returning body.token (the raw field) or the provider
+  // error text. T.36: the server's own emailSent wins (older servers only
+  // reported failures through emailError).
   const emailSent = typeof body.emailSent === 'boolean' ? body.emailSent : !body.emailError;
-  return { id: body.id, emailSent, ...(body.emailUnavailable ? { emailUnavailable: true as const } : {}) };
+  return {
+    id: body.id,
+    emailSent,
+    ...(body.emailUnavailable ? { emailUnavailable: true as const } : {}),
+    ...(typeof body.inviteLink === 'string' ? { inviteLink: body.inviteLink } : {}),
+    ...(typeof body.existingAccount === 'boolean' ? { existingAccount: body.existingAccount } : {}),
+    ...(body.duplicate ? { duplicate: true as const } : {}),
+  };
 };
+
+/** GET /api/invitations/received — the signed-in account's pending workspace invitations. */
+export const listReceivedInvitations = () => http.get<ReceivedInvitation[]>('/api/invitations/received');
+
+/** Accept: joins exactly that workspace as a member; every other membership stays. */
+export const acceptReceivedInvitation = (invitationId: string) =>
+  http.post<{ workspaceId: string; generalChannelId: string }>(`/api/invitations/received/${seg(invitationId)}/accept`);
+
+/** Decline: joins nothing; the invitation can no longer be used. */
+export const declineReceivedInvitation = (invitationId: string) =>
+  http.post<{ id: string; state: 'declined' }>(`/api/invitations/received/${seg(invitationId)}/decline`);
 
 export const revokeInvitation = (workspaceId: string, invitationId: string) =>
   http.delete<{ id: string; state: 'revoked' }>(`/api/workspaces/${seg(workspaceId)}/invitations/${seg(invitationId)}`);

@@ -4,14 +4,26 @@ import { invitationLookupLimiter } from '../../middleware/rateLimit.middleware';
 import { userRateLimit } from '../../middleware/userRateLimit.middleware';
 import {
   acceptInvitationHandler,
+  acceptReceivedInvitationHandler,
   createInvitationHandler,
+  declineInvitationByTokenHandler,
+  declineReceivedInvitationHandler,
   getInvitationHandler,
   listInvitationsHandler,
+  listReceivedInvitationsHandler,
 } from './invitations.controller';
 
 const router = Router();
 // Batch 3/E: per-user limits (audit: invite endpoints had none).
 const inviteLimiter = userRateLimit(30, 60_000, 'Too many invitation requests. Please slow down.');
+
+// Authenticated: the signed-in account's own in-app invitations (accept or
+// decline). Registered before "/:token" so "received" is never read as a token.
+router.get('/received', ...requireSessionUser, listReceivedInvitationsHandler);
+router.post('/received/:invitationId/accept', ...requireSessionUser, inviteLimiter, acceptReceivedInvitationHandler);
+router.post('/received/:invitationId/decline', ...requireSessionUser, inviteLimiter, declineReceivedInvitationHandler);
+// Authenticated: decline from the invitation link (the invited account only).
+router.post('/decline/:token', ...requireSessionUser, inviteLimiter, declineInvitationByTokenHandler);
 
 // Public: InviteHandler.tsx checks a token before it knows whether the
 // visitor is logged in at all.

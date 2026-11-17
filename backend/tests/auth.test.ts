@@ -70,10 +70,13 @@ describe('signup -> verify -> login -> me', () => {
     const code = mockedSendOtpEmail.mock.calls[0][1];
     await request(app).post('/api/auth/verify-otp').send({ email, code, inviteToken });
 
+    // A fresh, live invitation: the registered address itself is what is refused.
     const secondAttempt = await request(app)
       .post('/api/auth/signup-request')
-      .send({ username: uniqueUsername(), email, password, inviteToken });
+      .send({ username: uniqueUsername(), email, password, inviteToken: await invitationFor(email) });
     expect(secondAttempt.status).toBe(400);
+    // The first invitation was accepted by that sign-up and opens nothing more.
+    expect((await request(app).post('/api/auth/signup-request').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(403);
   });
 });
 
@@ -105,10 +108,13 @@ describe('direct signup (no OTP)', () => {
 
     const inviteToken = await invitationFor(email);
     await request(app).post('/api/auth/signup').send({ username, email, password, inviteToken });
+    // A fresh, live invitation: the registered address itself is what is refused.
     const res = await request(app)
       .post('/api/auth/signup')
-      .send({ username: uniqueUsername(), email, password, inviteToken });
+      .send({ username: uniqueUsername(), email, password, inviteToken: await invitationFor(email) });
     expect(res.status).toBe(400);
+    // The first invitation was accepted by that sign-up and opens nothing more.
+    expect((await request(app).post('/api/auth/signup').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(403);
   });
 
   it('rejects a too-short password', async () => {

@@ -11,10 +11,12 @@
  */
 export const INVITATION_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-export type InvitationState = 'pending' | 'accepted' | 'revoked' | 'expired';
+export type InvitationState = 'pending' | 'accepted' | 'declined' | 'revoked' | 'expired';
 
 export const invitationState = (invitation: { status: string; createdAt: Date }, now = Date.now()): InvitationState => {
   if (invitation.status === 'accepted') return 'accepted';
+  // The invited account said no (in-app or from the link); final, like accepted.
+  if (invitation.status === 'declined') return 'declined';
   if (invitation.status !== 'pending') return 'revoked'; // 'revoked' and any unknown legacy value
   return now - invitation.createdAt.getTime() >= INVITATION_TTL_MS ? 'expired' : 'pending';
 };
@@ -24,7 +26,7 @@ export const invitationExpiresAt = (invitation: { createdAt: Date }) => new Date
 /** Invitation addresses are compared case-insensitively (audit DB-04). */
 export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
-export type InvitationDenial = 'used' | 'revoked' | 'expired' | 'inviterLostAccess' | 'wrongAccount' | 'inactiveAccount';
+export type InvitationDenial = 'used' | 'declined' | 'revoked' | 'expired' | 'inviterLostAccess' | 'wrongAccount' | 'inactiveAccount';
 
 export interface InvitationAcceptance {
   state: InvitationState;
@@ -40,6 +42,7 @@ export interface InvitationAcceptance {
 /** null = may accept. The invitation only ever grants plain MEMBER — never a client-chosen role. */
 export const invitationAcceptanceDenial = (ctx: InvitationAcceptance): InvitationDenial | null => {
   if (ctx.state === 'accepted') return 'used';
+  if (ctx.state === 'declined') return 'declined';
   if (ctx.state === 'revoked') return 'revoked';
   if (ctx.state === 'expired') return 'expired';
   if (!ctx.inviterCanManage) return 'inviterLostAccess';

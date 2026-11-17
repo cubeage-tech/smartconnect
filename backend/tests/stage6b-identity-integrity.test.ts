@@ -148,7 +148,8 @@ describe('Stage 6B — current guarantees (always run)', () => {
     expect((await provisionTeamLead(capitalised(bySignup))).status).toBe(409);
     const offered = await provisionMember(upper(bySignup));
     expect(offered.status).toBe(409);
-    expect(offered.body.existingAccount).toBe(true);
+    // Sign-up through this workspace's invitation already joined it, so the lead is told so.
+    expect(offered.body.alreadyMember).toBe(true);
     expect(await accountsFor(bySignup)).toBe(1);
 
     const byAdmin = uniqueEmail();

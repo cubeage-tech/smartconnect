@@ -73,6 +73,35 @@ describe('typed API layer', () => {
     expect(await invitationsApi.listJoinRequests('ws')).toEqual([{ id: 'r1', createdAt: 'now', user: { id: 'u1', username: 'uma', email: 'u@x.test' } }]);
   });
 
+  // Invite by link: the inviter is handed the invitation's shareable link
+  // (shown once, to share when no e-mail goes out) — still never the raw
+  // token field or provider error text.
+  it('hands the inviter the shareable invitation link, whether it is new or already pending, and whether the address has an account', async () => {
+    const inviteLink = 'https://app.example/invite/3f1c2a9e-8b7d-4c6e-9a1f-2b3c4d5e6f70';
+    api.post.mockResolvedValue({ data: { success: true, id: 'i4', token: 'tok-SECRET', inviteLink, existingAccount: true, emailSent: false, emailError: 'SMTP 550 detail' } });
+    const created = await invitationsApi.inviteByEmail('ws', 'd@x.test');
+    expect(created).toEqual({ id: 'i4', emailSent: false, inviteLink, existingAccount: true });
+    expect(JSON.stringify(created)).not.toMatch(/tok-SECRET|SMTP/);
+
+    api.post.mockResolvedValue({ data: { success: true, id: 'i4', token: 'tok-SECRET', inviteLink, existingAccount: false, duplicate: true, emailSent: false } });
+    expect(await invitationsApi.inviteByEmail('ws', 'd@x.test')).toEqual({ id: 'i4', emailSent: false, inviteLink, existingAccount: false, duplicate: true });
+  });
+
+  it("lists, accepts and declines the signed-in account's own invitations by id", async () => {
+    const received = [{ id: 'i1', workspace: { id: 'w1', name: 'Apollo' }, inviter: { id: 'l1', username: 'lena', displayName: null }, createdAt: 'now', expiresAt: 'later' }];
+    api.get.mockResolvedValue({ data: received });
+    expect(await invitationsApi.listReceivedInvitations()).toEqual(received);
+    expect(api.get).toHaveBeenCalledWith('/api/invitations/received');
+
+    api.post.mockResolvedValue({ data: { workspaceId: 'w1', generalChannelId: 'c1' } });
+    expect(await invitationsApi.acceptReceivedInvitation('i/1')).toEqual({ workspaceId: 'w1', generalChannelId: 'c1' });
+    expect(api.post).toHaveBeenLastCalledWith('/api/invitations/received/i%2F1/accept', undefined);
+
+    api.post.mockResolvedValue({ data: { id: 'i1', state: 'declined' } });
+    expect(await invitationsApi.declineReceivedInvitation('i1')).toEqual({ id: 'i1', state: 'declined' });
+    expect(api.post).toHaveBeenLastCalledWith('/api/invitations/received/i1/decline', undefined);
+  });
+
   // T.36: with no e-mail provider the server saves the invitation but sends
   // nothing; the caller must not be told it was sent.
   it('reports an invitation saved without any e-mail as not sent, and why', async () => {

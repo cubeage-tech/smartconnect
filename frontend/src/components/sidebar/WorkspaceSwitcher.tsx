@@ -6,6 +6,7 @@ import { groupWorkspacesByAccess } from '../../lib/adminAccess';
 import { useWorkspaces } from '../../pages/workspace/WorkspacesProvider';
 import { useSwitchWorkspace } from '../../pages/workspace/useWorkspaceActions';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
+import { PendingInvitations } from './PendingInvitations';
 
 // The far-left, always-visible rail — distinct from (and always darker than)
 // the channel-list Sidebar next to it, matching the classic Slack "double
@@ -94,6 +95,8 @@ export const WorkspaceSwitcher = () => {
         <Plus size={18} aria-hidden="true" />
       </button>
       )}
+      {/* In-app workspace invitations (existing accounts) — shown only while one is pending. */}
+      <PendingInvitations />
       <button
         onClick={() => navigate(`/${activeWorkspaceId}/organizations`)}
         title="Organizations"

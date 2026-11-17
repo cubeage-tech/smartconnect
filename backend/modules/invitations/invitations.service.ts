@@ -10,6 +10,8 @@ import { logAuditEvent } from '../../lib/auditLog';
 import { HttpError } from '../../lib/httpError';
 import { findUserIdByEmail } from '../../lib/identity';
 import { isUuid } from '../../lib/messageInput';
+import { isSameEmail } from '../../lib/signupEmail';
+import { emitToRooms } from '../../sockets/registry';
 import {
   assertWorkspace,
   canJoinWorkspaces,
@@ -46,6 +48,18 @@ const stillManages = async (userId: string, workspaceId: string) =>
 const findUserByEmail = async (email: string) => {
   const id = await findUserIdByEmail(prisma, email);
   return id ? { id } : null;
+};
+
+/** The link the invitee opens (InviteHandler.tsx): sign up, or sign in and accept/decline. */
+const invitationLink = (token: string) => `${APP_URL}/invite/${token}`;
+
+/**
+ * Tells an invited account's open sessions to refresh its in-app invitations
+ * (frontend PendingInvitations). Payload carries no token.
+ */
+const notifyInvitee = async (email: string, workspaceId: string) => {
+  const invitee = await findUserByEmail(email);
+  if (invitee) emitToRooms([], [invitee.id], 'invitations:changed', { workspaceId });
 };
 
 /**
@@ -105,9 +119,34 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
     }
   }
 
-  const invitation = await prisma.invitation.create({ data: { email: normalized, inviterId, workspaceId: workspaceKey } });
+  // One pending invitation per workspace and address (any letter case): a
+  // repeated request returns the pending one instead of a duplicate. The
+  // per-(workspace, address) lock makes concurrent requests agree.
+  const { invitation, created } = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('workspace-invitation:' || ${workspaceKey}::text || ':' || lower(${normalized}::text)))`;
+    const pendingRows = await tx.$queryRaw<{ id: string; status: string; createdAt: Date }[]>`
+      SELECT id, status, "createdAt" FROM "Invitation"
+      WHERE "workspaceId" = ${workspaceKey}::text AND lower(email) = lower(${normalized}::text) AND status = 'pending'
+      ORDER BY "createdAt" DESC`;
+    const live = pendingRows.find((row) => invitationState(row) === 'pending');
+    if (live) return { invitation: await tx.invitation.findUniqueOrThrow({ where: { id: live.id } }), created: false };
+    return { invitation: await tx.invitation.create({ data: { email: normalized, inviterId, workspaceId: workspaceKey } }), created: true };
+  });
+  // Returned to the inviter only (never listed): the link to share when no
+  // e-mail goes out. It grants nothing by itself — signing up needs this exact
+  // address, and accepting needs that account's own session.
+  const inviteLink = invitationLink(invitation.token);
+  const result = { success: true, id: invitation.id, token: invitation.token, inviteLink, existingAccount: !!existingUser };
+
+  if (!created) {
+    return {
+      status: 200,
+      body: { ...result, duplicate: true, emailSent: false, message: `An invitation for ${normalized} is already pending.` },
+    };
+  }
   await logAuditEvent(inviterId, 'CREATE_INVITATION', 'WORKSPACE', workspaceKey, `Invited ${normalized}`);
-  const inviteLink = `${APP_URL}/invite/${invitation.token}`;
+  // An existing account sees the invitation in the app (accept or decline) at once.
+  if (existingUser) emitToRooms([], [existingUser.id], 'invitations:changed', { workspaceId: workspaceKey });
 
   // T.36: with no e-mail provider configured, say so — never "sent". The
   // invitation still exists (it lets this address sign up), and the Team
@@ -117,12 +156,10 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
     return {
       status: 201,
       body: {
-        success: true,
+        ...result,
         emailSent: false,
         emailUnavailable: true,
         message: 'Invitation saved, but no e-mail was sent: e-mail delivery is not configured on this server.',
-        token: invitation.token,
-        id: invitation.id,
       },
     };
   }
@@ -134,11 +171,9 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
     return {
       status: 201,
       body: {
-        success: true,
+        ...result,
         emailSent: false,
         message: 'Invitation created but email failed to send',
-        token: invitation.token,
-        id: invitation.id,
         emailError: emailErr.message,
       },
     };
@@ -146,7 +181,7 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
 
   return {
     status: 201,
-    body: { success: true, emailSent: true, message: 'Invite sent successfully', token: invitation.token, id: invitation.id },
+    body: { ...result, emailSent: true, message: 'Invite sent successfully' },
   };
 };
 
@@ -163,11 +198,13 @@ export const revokeInvitation = async (actorId: string, workspaceId: string, inv
   });
   if (revoked.count === 0) throw new HttpError(400, 'Only pending invitations can be revoked.');
   await logAuditEvent(actorId, 'REVOKE_INVITATION', 'WORKSPACE', workspaceId, `Revoked the invitation for ${invitation.email}`);
+  await notifyInvitee(invitation.email, workspaceId); // it leaves their in-app list
   return { id: invitation.id, state: 'revoked' as const };
 };
 
 const DENIALS: Record<InvitationDenial, [number, (email: string) => string]> = {
   used: [400, () => 'This invitation has already been used.'],
+  declined: [400, () => 'This invitation was declined.'],
   revoked: [400, () => 'This invitation has been revoked.'],
   expired: [400, () => 'This invitation has expired.'],
   inviterLostAccess: [400, () => 'This invitation is no longer valid.'],
@@ -192,7 +229,7 @@ export const getInvitationByToken = async (token: string) => {
   if (!invitation) throw new HttpError(404, 'Invitation not found or expired');
   const state = invitationState(invitation);
   const denial: InvitationDenial | null =
-    state === 'accepted' ? 'used' : state === 'revoked' ? 'revoked' : state === 'expired' ? 'expired'
+    state === 'accepted' ? 'used' : state === 'declined' ? 'declined' : state === 'revoked' ? 'revoked' : state === 'expired' ? 'expired'
       : (await stillManages(invitation.inviterId, invitation.workspaceId)) ? null : 'inviterLostAccess';
   if (denial) throw new HttpError(DENIALS[denial][0], DENIALS[denial][1](invitation.email));
 
@@ -221,7 +258,13 @@ export const acceptInvitation = async (token: string, userId: string) => {
 
   const invitation = await prisma.invitation.findUnique({ where: { token } });
   if (!invitation) throw new HttpError(404, 'Invitation not found or expired');
+  return acceptLoadedInvitation(invitation, userId);
+};
 
+type InvitationRow = { id: string; email: string; status: string; createdAt: Date; inviterId: string; workspaceId: string };
+
+/** The acceptance rules above, for an invitation already loaded by token or by id. */
+const acceptLoadedInvitation = async (invitation: InvitationRow, userId: string) => {
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, status: true } });
   if (!user) throw new HttpError(404, 'User not found');
 
@@ -266,6 +309,137 @@ export const acceptInvitation = async (token: string, userId: string) => {
   if (!consumed && !(await alreadyJoined())) throw new HttpError(400, DENIALS.used[1](invitation.email));
 
   return { workspaceId: invitation.workspaceId, generalChannelId: generalChannel.id };
+};
+
+/** The signed-in account's own address, for matching invitations to it. */
+const accountEmail = async (userId: string) => {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+  if (!user) throw new HttpError(404, 'User not found');
+  return user.email;
+};
+
+/**
+ * An invitation addressed to this account, by id — 404 for anyone else's, so
+ * ids reveal nothing about other people's invitations.
+ */
+const loadOwnInvitation = async (userId: string, invitationId: unknown) => {
+  const invitation = isUuid(invitationId) ? await prisma.invitation.findUnique({ where: { id: invitationId } }) : null;
+  if (!invitation || normalizeEmail(invitation.email) !== normalizeEmail(await accountEmail(userId))) {
+    throw new HttpError(404, 'Invitation not found');
+  }
+  return invitation;
+};
+
+/**
+ * GET /api/invitations/received — the signed-in account's in-app workspace
+ * invitations: pending, unexpired, from someone who may still invite, to a
+ * workspace it is not in yet. Never includes tokens. One per workspace (the
+ * newest) even if older duplicates exist.
+ */
+export const listReceivedInvitations = async (userId: string) => {
+  const email = await accountEmail(userId);
+  // Stage 6C (IDN-3): exact address in any letter case — "_" and "%" are ordinary characters.
+  const ids = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Invitation" WHERE lower(email) = lower(${email}::text) AND status = 'pending'`;
+  if (ids.length === 0) return [];
+  const rows = await prisma.invitation.findMany({
+    where: { id: { in: ids.map((row) => row.id) } },
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
+      inviterId: true,
+      workspaceId: true,
+      workspace: { select: { id: true, name: true } },
+      inviter: { select: { id: true, username: true, profile: { select: { displayName: true } } } },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+  const memberOf = new Set(
+    (await prisma.workspaceMember.findMany({ where: { userId, workspaceId: { in: rows.map((r) => r.workspaceId) } }, select: { workspaceId: true } }))
+      .map((m) => m.workspaceId)
+  );
+  const received = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.workspaceId) || memberOf.has(row.workspaceId)) continue;
+    if (invitationState(row) !== 'pending' || !(await stillManages(row.inviterId, row.workspaceId))) continue;
+    seen.add(row.workspaceId);
+    received.push({
+      id: row.id,
+      workspace: row.workspace,
+      inviter: { id: row.inviter.id, username: row.inviter.username, displayName: row.inviter.profile?.displayName ?? null },
+      createdAt: row.createdAt,
+      expiresAt: invitationExpiresAt(row),
+    });
+  }
+  return received;
+};
+
+/** POST /api/invitations/received/:invitationId/accept — same rules as accepting from the link. */
+export const acceptReceivedInvitation = async (userId: string, invitationId: unknown) =>
+  acceptLoadedInvitation(await loadOwnInvitation(userId, invitationId), userId);
+
+const declineLoadedInvitation = async (invitation: InvitationRow, userId: string) => {
+  if (invitationState(invitation) !== 'pending') throw new HttpError(400, 'Only pending invitations can be declined.');
+  const declined = await prisma.invitation.updateMany({ where: { id: invitation.id, status: 'pending' }, data: { status: 'declined' } });
+  if (declined.count === 0) throw new HttpError(400, 'Only pending invitations can be declined.');
+  await logAuditEvent(userId, 'DECLINE_INVITATION', 'WORKSPACE', invitation.workspaceId, `Declined the invitation for ${invitation.email}`);
+  return { id: invitation.id, state: 'declined' as const };
+};
+
+/** POST /api/invitations/received/:invitationId/decline — the invited account says no; nothing else changes. */
+export const declineReceivedInvitation = async (userId: string, invitationId: unknown) =>
+  declineLoadedInvitation(await loadOwnInvitation(userId, invitationId), userId);
+
+/** POST /api/invitations/decline/:token — the same, from the invitation link (InviteHandler.tsx). */
+export const declineInvitationByToken = async (token: string, userId: string) => {
+  const invitation = isUuid(token) ? await prisma.invitation.findUnique({ where: { token } }) : null;
+  if (!invitation) throw new HttpError(404, 'Invitation not found or expired');
+  if (normalizeEmail(invitation.email) !== normalizeEmail(await accountEmail(userId))) {
+    throw new HttpError(DENIALS.wrongAccount[0], DENIALS.wrongAccount[1](invitation.email));
+  }
+  return declineLoadedInvitation(invitation, userId);
+};
+
+/**
+ * Sign-up through an e-mail invitation (auth.service signup/verifySignupOtp):
+ * inside the transaction that creates the account, consume exactly the
+ * invitation whose link was used and add the new account to that workspace as
+ * MEMBER (+ its General channel), landing there first. The sign-up gate
+ * (inviteOnlySignup.middleware) already checked the token against this
+ * address; this re-checks it under the transaction. null = not acceptable
+ * (revoked, used or expired meanwhile) — the caller refuses the sign-up.
+ */
+export const acceptInvitationForNewAccount = async (
+  tx: Prisma.TransactionClient,
+  token: unknown,
+  account: { id: string; email: string }
+): Promise<{ workspaceId: string; generalChannelId: string | null } | null> => {
+  if (!isUuid(token)) return null;
+  const invitation = await tx.invitation.findUnique({ where: { token } });
+  if (!invitation || invitationState(invitation) !== 'pending') return null;
+  if (!(await isSameEmail(tx, invitation.email, account.email))) return null;
+  if (!(await stillManages(invitation.inviterId, invitation.workspaceId))) return null;
+  // The single-use lock, as in acceptInvitation.
+  const flipped = await tx.invitation.updateMany({ where: { id: invitation.id, status: 'pending' }, data: { status: 'accepted' } });
+  if (flipped.count === 0) return null;
+  const { workspaceId } = invitation;
+  await tx.workspaceMember.upsert({
+    where: { userId_workspaceId: { userId: account.id, workspaceId } },
+    update: {},
+    create: { userId: account.id, workspaceId, role: 'MEMBER' },
+  });
+  const general = await tx.channel.findFirst({ where: { name: 'General', isDM: false, workspaceId }, select: { id: true } });
+  if (general) {
+    await tx.channelMember.upsert({
+      where: { userId_channelId: { userId: account.id, channelId: general.id } },
+      update: {},
+      create: { userId: account.id, channelId: general.id, role: 'member' },
+    });
+  }
+  await tx.user.update({ where: { id: account.id }, data: { lastActiveWorkspaceId: workspaceId } });
+  return { workspaceId, generalChannelId: general?.id ?? null };
 };
 
 // Discord/Slack-style reusable invite link — "anyone with the link can ask

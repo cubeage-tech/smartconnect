@@ -58,7 +58,7 @@ beforeEach(() => vi.mocked(sendOtpEmail).mockClear());
 
 describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
   it('1. a valid invitation creates exactly one ACTIVE account, stored as typed (login unchanged)', async () => {
-    const { invite } = await inviter();
+    const { invite, workspaceId } = await inviter();
     const email = uniqueEmail();
     const inviteToken = await invite(email);
     const typed = variants(email)[2]; // the invitee types their address with a capital letter
@@ -69,8 +69,10 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     expect(account.status).toBe('ACTIVE');
     expect(await accountsFor(email)).toBe(1);
     expect((await post('/api/auth/login', { email: typed, password: PASSWORD })).status).toBe(200);
-    // Sign-up alone does not join the invited workspace; acceptance (unchanged flow) does.
-    expect(await invitationStatus(inviteToken)).toBe('pending');
+    // Sign-up through an invitation also accepts it, in the same transaction:
+    // the new account joins exactly the invited workspace at once.
+    expect(await invitationStatus(inviteToken)).toBe('accepted');
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id, workspaceId } })).toBe(1);
   });
 
   it('2. letter-case variants of the invited address cannot open a second account', async () => {
@@ -78,10 +80,14 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     const email = uniqueEmail();
     const inviteToken = await invite(email);
     expect((await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken })).status).toBe(201);
+    // A fresh, live invitation for the same address: only the existing account can refuse these.
+    const another = await invite(email);
     for (const variant of variants(email)) {
-      const res = await signup({ username: uniqueUsername(), email: variant, password: PASSWORD, inviteToken });
+      const res = await signup({ username: uniqueUsername(), email: variant, password: PASSWORD, inviteToken: another });
       expect(res.status, variant).toBe(400);
       expect(res.body.error, variant).toMatch(/already exists/);
+      // The invitation the account signed up with was accepted and opens nothing more.
+      expect((await signup({ username: uniqueUsername(), email: variant, password: PASSWORD, inviteToken })).status, variant).toBe(403);
     }
     expect(await accountsFor(email)).toBe(1);
   });
@@ -101,14 +107,17 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     expect(await accountsFor(email)).toBe(1);
   });
 
-  it('4. a consumed invitation is refused: after its account exists (400) and after acceptance (403)', async () => {
+  it('4. a consumed invitation is refused: sign-up accepts it, so reusing it in any letter case is refused (403)', async () => {
     const { invite, workspaceId } = await inviter();
     const email = uniqueEmail();
     const inviteToken = await invite(email);
     const first = await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken });
     expect(first.status).toBe(201);
-    expect((await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken })).status).toBe(400);
+    // Account creation and acceptance are one step now: the token is spent and the workspace joined.
+    expect(first.body.invitation.workspaceId).toBe(workspaceId);
+    expect(await invitationStatus(inviteToken)).toBe('accepted');
 
+    // The web client's follow-up accept stays harmless for the same account.
     const accepted = await request(app).post(`/api/invitations/accept/${inviteToken}`).set(authHeader(first.body.token));
     expect(accepted.status).toBe(200);
     expect(accepted.body.workspaceId).toBe(workspaceId);

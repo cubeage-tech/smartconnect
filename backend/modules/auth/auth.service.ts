@@ -12,6 +12,26 @@ import { hasLiveInvitation, hasSignupConflict, lockSignupEmail, rethrowAsDuplica
 import { INVITE_ONLY_MESSAGE } from '../../middleware/inviteOnlySignup.middleware';
 import { sendOtpEmail, sendResetPasswordEmail } from '../../utils/mailer';
 import { DEFAULT_WORKSPACE_SLUG } from '../workspaces/workspaces.service';
+import { acceptInvitationForNewAccount } from '../invitations/invitations.service';
+import { ensureOrganizationMembership } from '../organizations/organizations.service';
+
+/**
+ * Sign-up is invitation-only (inviteOnlySignup.middleware): the account is
+ * created and the invitation whose link was used is accepted in ONE
+ * transaction, so a new person always lands in exactly the workspace they
+ * were invited to (plus SmartConnect Collab) — never an account without it,
+ * and no second "accept" request that could be skipped.
+ */
+const acceptSignupInvitation = async (tx: Prisma.TransactionClient, inviteToken: unknown, account: { id: string; email: string }) => {
+  const joined = await acceptInvitationForNewAccount(tx, inviteToken, account);
+  if (!joined) throw new HttpError(403, INVITE_ONLY_MESSAGE);
+  return joined;
+};
+
+/** Organization membership for the invited workspace (outside the account transaction, like accepting later). */
+const joinInvitedOrganization = async (joined: { workspaceId: string }, userId: string) => {
+  await ensureOrganizationMembership(joined.workspaceId, userId);
+};
 
 class HttpError extends Error {
   status: number;
@@ -117,7 +137,7 @@ const joinGeneralChannel = async (tx: Prisma.TransactionClient, userId: string):
  * now. Same validation/hashing/default-workspace-join as the OTP path's
  * second step, minus the email round-trip.
  */
-export const signup = async (rawUsername: unknown, rawEmail: unknown, rawPassword: unknown, meta: SessionMeta = {}) => {
+export const signup = async (rawUsername: unknown, rawEmail: unknown, rawPassword: unknown, meta: SessionMeta = {}, inviteToken?: unknown) => {
   const { username, email, password } = validateSignupFields(rawUsername, rawEmail, rawPassword);
 
   // Stage 6A (AUTH-1): the address matches in any letter case (lib/signupEmail.ts).
@@ -137,9 +157,11 @@ export const signup = async (rawUsername: unknown, rawEmail: unknown, rawPasswor
     // Stage 6C (R1): the invitation the gate accepted must still be live — held until commit.
     if (!(await hasLiveInvitation(tx, email))) throw new HttpError(403, INVITE_ONLY_MESSAGE);
     const newUser = await tx.user.create({ data: { username, email, password: hashedPassword } });
-    const defaultWorkspaceId = await joinGeneralChannel(tx, newUser.id);
-    return { ...newUser, lastActiveWorkspaceId: defaultWorkspaceId };
+    await joinGeneralChannel(tx, newUser.id);
+    const invitation = await acceptSignupInvitation(tx, inviteToken, newUser);
+    return { ...newUser, lastActiveWorkspaceId: invitation.workspaceId, invitation };
   }).catch(rethrowAsDuplicateAccount('A user with this email or username already exists'));
+  await joinInvitedOrganization(user.invitation, user.id);
 
   const token = await issueSession({ id: user.id, username: user.username, role: user.role }, meta);
   return {
@@ -151,6 +173,7 @@ export const signup = async (rawUsername: unknown, rawEmail: unknown, rawPasswor
       role: user.role,
       lastActiveWorkspaceId: user.lastActiveWorkspaceId,
     },
+    invitation: user.invitation,
   };
 };
 
@@ -193,7 +216,7 @@ export const requestSignupOtp = async (rawUsername: unknown, rawEmail: unknown, 
  * and only on success actually creates the `User` row, joins General, and
  * removes the OTPVerification record — all inside one transaction.
  */
-export const verifySignupOtp = async (email: unknown, code: unknown, meta: SessionMeta = {}) => {
+export const verifySignupOtp = async (email: unknown, code: unknown, meta: SessionMeta = {}, inviteToken?: unknown) => {
   if (!isFilledString(email) || !isFilledString(code)) {
     throw new HttpError(400, 'email and code are required');
   }
@@ -243,11 +266,13 @@ export const verifySignupOtp = async (email: unknown, code: unknown, meta: Sessi
       data: { username: pending.username, email: pending.email, password: pending.password },
     });
 
-    const defaultWorkspaceId = await joinGeneralChannel(tx, newUser.id);
+    await joinGeneralChannel(tx, newUser.id);
+    const invitation = await acceptSignupInvitation(tx, inviteToken, newUser);
     await tx.oTPVerification.delete({ where: { email } });
 
-    return { ...newUser, lastActiveWorkspaceId: defaultWorkspaceId };
+    return { ...newUser, lastActiveWorkspaceId: invitation.workspaceId, invitation };
   }).catch(rethrowAsDuplicateAccount('A user with this email or username already exists.'));
+  await joinInvitedOrganization(user.invitation, user.id);
 
   const token = await issueSession({ id: user.id, username: user.username, role: user.role }, meta);
   return {
@@ -259,6 +284,7 @@ export const verifySignupOtp = async (email: unknown, code: unknown, meta: Sessi
       role: user.role,
       lastActiveWorkspaceId: user.lastActiveWorkspaceId,
     },
+    invitation: user.invitation,
   };
 };
 

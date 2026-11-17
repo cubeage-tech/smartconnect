@@ -15,6 +15,7 @@ vi.mock('../../pages/workspace/WorkspacesProvider', () => ({
 }));
 vi.mock('../../pages/workspace/useWorkspaceActions', () => ({ useSwitchWorkspace: () => vi.fn() }));
 vi.mock('./CreateWorkspaceModal', () => ({ CreateWorkspaceModal: () => null }));
+vi.mock('./PendingInvitations', () => ({ PendingInvitations: () => null })); // own tests: PendingInvitations.test.tsx
 
 const renderSwitcher = () =>
   render(

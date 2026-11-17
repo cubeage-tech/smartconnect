@@ -47,10 +47,42 @@ export const getInvitationHandler = async (req: Request, res: Response, next: Ne
 export const acceptInvitationHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const result = await invitationsService.acceptInvitation(req.params.token, req.user!.id);
-    await ensureOrganizationMembership(result.workspaceId, req.user!.id);
-    subscribeUserToChannel(req.user!.id, result.generalChannelId);
-    addWorkspacePresence(req.user!.id, result.workspaceId);
-    res.json(result);
+    res.json(await joinedWorkspace(req.user!.id, result));
+  } catch (err) { next(err); }
+};
+
+/** After an accepted invitation: organization membership and live rooms for the new workspace. */
+const joinedWorkspace = async (userId: string, result: { workspaceId: string; generalChannelId: string }) => {
+  await ensureOrganizationMembership(result.workspaceId, userId);
+  subscribeUserToChannel(userId, result.generalChannelId);
+  addWorkspacePresence(userId, result.workspaceId);
+  return result;
+};
+
+// In-app invitations for the signed-in account (existing users): list,
+// accept or decline. Only invitations addressed to this account's own e-mail.
+export const listReceivedInvitationsHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await invitationsService.listReceivedInvitations(req.user!.id));
+  } catch (err) { next(err); }
+};
+
+export const acceptReceivedInvitationHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const result = await invitationsService.acceptReceivedInvitation(req.user!.id, req.params.invitationId);
+    res.json(await joinedWorkspace(req.user!.id, result));
+  } catch (err) { next(err); }
+};
+
+export const declineReceivedInvitationHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await invitationsService.declineReceivedInvitation(req.user!.id, req.params.invitationId));
+  } catch (err) { next(err); }
+};
+
+export const declineInvitationByTokenHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    res.json(await invitationsService.declineInvitationByToken(req.params.token, req.user!.id));
   } catch (err) { next(err); }
 };
 

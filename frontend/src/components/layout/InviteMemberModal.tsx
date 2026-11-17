@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { formatDate } from '../../lib/adminAccess';
 import { errorMessage, invitationsApi } from '../../lib/api';
 import { Button, Field, Modal, Spinner, TextInput } from '../ui';
+import { InvitationLinkNotice } from '../workspaceAdmin/InvitationLinkNotice';
 
 interface InviteMemberModalProps {
   isOpen: boolean;
@@ -27,6 +28,8 @@ export const InviteMemberModal = ({ isOpen, onClose, workspaceId }: InviteMember
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // The last invitation's own link, shown once to share (e.g. when no e-mail went out).
+  const [lastInvite, setLastInvite] = useState<{ email: string; link: string; existingAccount: boolean } | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -73,8 +76,11 @@ export const InviteMemberModal = ({ isOpen, onClose, workspaceId }: InviteMember
     try {
       const result = await invitationsApi.inviteByEmail(workspaceId, value);
       setEmail('');
-      if (result.emailSent) toast.success(`Invitation sent to ${value}.`);
-      else toast.warning(`Invitation created for ${value}, but the e-mail couldn't be delivered. Share the invite link instead.`);
+      setLastInvite(result.inviteLink ? { email: value, link: result.inviteLink, existingAccount: !!result.existingAccount } : null);
+      if (result.duplicate) toast.info(`An invitation for ${value} is already pending — its link is below.`);
+      else if (result.emailSent) toast.success(`Invitation sent to ${value}.`);
+      else if (result.existingAccount) toast.success(`Invitation saved for ${value} — they already have an account and will see it in SmartConnect.`);
+      else toast.warning(`Invitation created for ${value}, but no e-mail was delivered. Share the invitation link below.`);
     } catch (err) {
       setEmailError(errorMessage(err, 'Could not send the invitation.'));
     } finally {
@@ -94,6 +100,7 @@ export const InviteMemberModal = ({ isOpen, onClose, workspaceId }: InviteMember
               Send invite
             </Button>
           </div>
+          {lastInvite && <InvitationLinkNotice email={lastInvite.email} link={lastInvite.link} existingAccount={lastInvite.existingAccount} />}
         </form>
 
         <div className="border-t border-line pt-5">

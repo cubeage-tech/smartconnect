@@ -8,8 +8,9 @@ import type { InvitationState } from '../../lib/api';
 import { AccessProblem } from '../management/AccessProblem';
 import { Section } from '../management/PageFrame';
 import { Badge, Button, EmptyState, Field, LoadingState, TextInput, useConfirm } from '../ui';
+import { InvitationLinkNotice } from './InvitationLinkNotice';
 
-const FILTERS: ('all' | InvitationState)[] = ['all', 'pending', 'accepted', 'expired', 'revoked'];
+const FILTERS: ('all' | InvitationState)[] = ['all', 'pending', 'accepted', 'declined', 'expired', 'revoked'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface InvitationsPanelProps {
@@ -21,11 +22,12 @@ interface InvitationsPanelProps {
 }
 
 /**
- * Invite by e-mail, the invitation history (pending / accepted / expired /
- * revoked, computed server-side) with per-invitation revocation, and the
- * shareable invite link. Per-email invitation tokens never reach this
- * component (lib/api/invitations.ts drops them). The backend emits no events
- * for invitations, so the list refreshes after every action and on focus.
+ * Invite by e-mail, the invitation history (pending / accepted / declined /
+ * expired / revoked, computed server-side) with per-invitation revocation,
+ * and the shareable invite link. Invitation tokens are never listed; the one
+ * exception is the link of the invitation just created, shown once to share
+ * (InvitationLinkNotice). The backend emits no manager events for
+ * invitations, so the list refreshes after every action and on focus.
  */
 export const InvitationsPanel = ({ workspaceId, emailInvitationsAvailable = true, onPendingCountChange }: InvitationsPanelProps) => {
   const invitations = useApiQuery(() => invitationsApi.listWorkspaceInvitations(workspaceId), [workspaceId], { refetchOnFocus: true });
@@ -36,6 +38,8 @@ export const InvitationsPanel = ({ workspaceId, emailInvitationsAvailable = true
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [linkBusy, setLinkBusy] = useState<'copy' | 'revoke' | null>(null);
   const [manualLink, setManualLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  // The last invitation's own link, shown once to share (e.g. when no e-mail went out).
+  const [lastInvite, setLastInvite] = useState<{ email: string; link: string; existingAccount: boolean } | null>(null);
   const { confirm, dialog } = useConfirm();
 
   const list = useMemo(() => invitations.data ?? [], [invitations.data]);
@@ -62,9 +66,12 @@ export const InvitationsPanel = ({ workspaceId, emailInvitationsAvailable = true
     try {
       const result = await invitationsApi.inviteByEmail(workspaceId, value);
       setEmail('');
-      if (result.emailSent) toast.success(`Invitation sent to ${value}.`);
-      else if (result.emailUnavailable) toast.warning(`Invitation saved for ${value}. No e-mail was sent — e-mail delivery isn't configured on this server.`);
-      else toast.warning(`Invitation created for ${value}, but the e-mail couldn't be delivered. Share an invite link instead.`);
+      setLastInvite(result.inviteLink ? { email: value, link: result.inviteLink, existingAccount: !!result.existingAccount } : null);
+      if (result.duplicate) toast.info(`An invitation for ${value} is already pending — its link is below.`);
+      else if (result.emailSent) toast.success(`Invitation sent to ${value}.`);
+      else if (result.existingAccount) toast.success(`Invitation saved for ${value} — they already have an account and will see it in SmartConnect.`);
+      else if (result.emailUnavailable) toast.warning(`Invitation saved for ${value}. No e-mail was sent — e-mail delivery isn't configured on this server. Share the invitation link below.`);
+      else toast.warning(`Invitation created for ${value}, but the e-mail couldn't be delivered. Share the invitation link below.`);
       await invitations.reload({ silent: true });
     } catch (err) {
       setEmailError(errorMessage(err, 'Could not send the invitation.'));
@@ -155,6 +162,7 @@ export const InvitationsPanel = ({ workspaceId, emailInvitationsAvailable = true
             {emailInvitationsAvailable ? 'Send invite' : 'Create invitation'}
           </Button>
         </form>
+        {lastInvite && <InvitationLinkNotice email={lastInvite.email} link={lastInvite.link} existingAccount={lastInvite.existingAccount} />}
       </Section>
 
       <Section

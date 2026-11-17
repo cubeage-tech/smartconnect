@@ -10,10 +10,11 @@ import { isInvitationToken } from '../../lib/invitationToken';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 
 // Shown instead of redirecting into the workspace when a join link now
-// requires admin approval (see PendingRequests in Directory.tsx) — the old
-// instant-join behavior is still what happens for `inviteToken` (the
-// email-bound invite flow) and for a `joinToken` that resolves to
-// 'already_member', just not for a fresh 'pending' join request.
+// requires admin approval (see PendingRequests in Directory.tsx) — a
+// `joinToken` that resolves to 'already_member' still goes straight in. An
+// `inviteToken` (the email-bound invitation) is decided on its own page
+// (InviteHandler: Accept / Decline), except right after a sign-up made
+// here, which already accepted it.
 const PendingApprovalScreen = () => (
   <div className="min-h-screen bg-[#faf9fa] flex items-center justify-center p-4 font-sans">
     <div className="bg-white p-8 lg:p-10 rounded-2xl shadow-xl max-w-md w-full border border-gray-100 text-center">
@@ -53,6 +54,11 @@ export const LoginPage = () => {
   const acceptedTokenRef = useRef<string | null>(null);
   const joinedTokenRef = useRef<string | null>(null);
   const [joinPending, setJoinPending] = useState(false);
+  // Was someone already signed in when this page opened? (null until the
+  // session check finishes.) Tells a sign-up made here apart from an
+  // existing account that merely opened an invitation link.
+  const arrivedSignedInRef = useRef<boolean | null>(null);
+  if (!loading && arrivedSignedInRef.current === null) arrivedSignedInRef.current = !!user;
 
   useEffect(() => {
     if (!user || !inviteToken) return;
@@ -66,13 +72,23 @@ export const LoginPage = () => {
       navigate('/', { replace: true });
       return;
     }
+    const signedUpHere = location.pathname === '/signup' && arrivedSignedInRef.current === false;
+    if (!signedUpHere) {
+      // An existing account decides: the invitation page offers Accept /
+      // Decline. Signing in (or opening a link) never accepts by itself.
+      navigate(`/invite/${encodeURIComponent(inviteToken)}`, { replace: true });
+      return;
+    }
+    // A new account created on this page: the sign-up itself accepted the
+    // invitation (server side). Confirm it — idempotent for the same person —
+    // and open the invited workspace.
     axios.post<{ workspaceId: string; generalChannelId: string }>(`/api/invitations/accept/${encodeURIComponent(inviteToken)}`)
       .then(({ data }) => navigate(`/${data.workspaceId}/c/${data.generalChannelId}`, { replace: true }))
       .catch((err) => {
         toast.error(err.response?.data?.error || 'Failed to join the invited workspace.');
         navigate('/', { replace: true });
       });
-  }, [user, inviteToken, navigate]);
+  }, [user, inviteToken, navigate, location.pathname]);
 
   useEffect(() => {
     if (!user || !joinToken) return;

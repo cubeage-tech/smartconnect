@@ -15,7 +15,7 @@ export * as teamManagementApi from './teamManagement';
 export * as workspacesApi from './workspaces';
 export type { SearchResult } from './channels';
 export type { ActivityNotification, ConversationRef, WorkspaceSearchResult } from './activity';
-export type { InvitationState, InviteResult, JoinRequest, WorkspaceInvitation } from './invitations';
+export type { InvitationState, InviteResult, JoinRequest, ReceivedInvitation, WorkspaceInvitation } from './invitations';
 export type {
   OrganizationCapabilities,
   OrganizationDetails,

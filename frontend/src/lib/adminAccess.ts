@@ -112,6 +112,7 @@ export const organizationRoleLabel = (role: string | null | undefined): MemberRo
 export const INVITATION_STATE_LABEL: Record<InvitationState, string> = {
   pending: 'Pending',
   accepted: 'Accepted',
+  declined: 'Declined',
   expired: 'Expired',
   revoked: 'Revoked',
 };
@@ -119,6 +120,7 @@ export const INVITATION_STATE_LABEL: Record<InvitationState, string> = {
 export const INVITATION_STATE_TONE: Record<InvitationState, 'warning' | 'success' | 'neutral' | 'danger'> = {
   pending: 'warning',
   accepted: 'success',
+  declined: 'neutral',
   expired: 'neutral',
   revoked: 'danger',
 };

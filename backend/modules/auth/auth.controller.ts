@@ -11,8 +11,8 @@ const sessionMeta = (req: AuthenticatedRequest) => ({ userAgent: req.get('user-a
 
 export const signupHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { username, email, password } = req.body;
-    const result = await authService.signup(username, email, password, sessionMeta(req));
+    const { username, email, password, inviteToken } = req.body;
+    const result = await authService.signup(username, email, password, sessionMeta(req), inviteToken);
     res.status(201).json(result);
   } catch (err) { next(err); }
 };
@@ -27,8 +27,8 @@ export const signupRequestHandler = async (req: AuthenticatedRequest, res: Respo
 
 export const verifyOtpHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { email, code } = req.body;
-    const result = await authService.verifySignupOtp(email, code, sessionMeta(req));
+    const { email, code, inviteToken } = req.body;
+    const result = await authService.verifySignupOtp(email, code, sessionMeta(req), inviteToken);
     res.status(201).json(result);
   } catch (err) { next(err); }
 };

@@ -196,7 +196,8 @@ describe('Stage 6C — IDN-3: "_", "%" and "\\" are ordinary characters in ident
     expect((await signupWithInvite(bySignup)).status).toBe(201);
     expect((await adminCreate(upper(bySignup))).status).toBe(409);
     expect((await provisionTeamLead(upper(bySignup))).status).toBe(409);
-    expect((await provisionMember(bySignup.toLowerCase())).body.existingAccount).toBe(true);
+    // Sign-up through this workspace's invitation already joined it (same identity, any spelling).
+    expect((await provisionMember(bySignup.toLowerCase())).body.alreadyMember).toBe(true);
 
     const byAdmin = tricky('a');
     expect((await adminCreate(byAdmin)).status).toBe(201);
@@ -246,7 +247,7 @@ describe('Stage 6C — R1: invitation revocation and sign-up', () => {
     expect(await accountsFor(email)).toBe(0);
   }, 30_000);
 
-  it('#6 a revocation racing a sign-up that already holds the invitation waits for it: one account, then revoked', async () => {
+  it('#6 a revocation racing a sign-up that already holds the invitation waits for it: one account, which accepted it; the late revocation finds nothing pending', async () => {
     const email = uniqueEmail();
     const typed = capitalised(email);
     const invitation = await invite(email);
@@ -259,13 +260,12 @@ describe('Stage 6C — R1: invitation revocation and sign-up', () => {
       return { signedUp: await signedUpP, revoked: await revokedP };
     });
     expect(signedUp.status).toBe(201);
-    expect(revoked.status).toBe(200);
+    // Serialized: the sign-up held the invitation first and accepted it in its own
+    // transaction; the revocation, waiting behind it, then finds nothing pending.
+    expect(revoked.status).toBe(400);
     expect(await accountsFor(email)).toBe(1);
-    expect(await invitationStatus(invitation.id)).toBe('revoked');
-    // The existing accept flow then refuses the revoked invitation; the account keeps SmartConnect Collab only.
-    const accepted = await request(app).post(`/api/invitations/accept/${invitation.token}`).set(authHeader(signedUp.body.token));
-    expect(accepted.status).toBe(400);
-    expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(0);
+    expect(await invitationStatus(invitation.id)).toBe('accepted');
+    expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(1);
   }, 30_000);
 
   it('#7 a failed sign-up leaves its invitation pending and usable — refused before, or failing inside, the transaction', async () => {
@@ -284,19 +284,19 @@ describe('Stage 6C — R1: invitation revocation and sign-up', () => {
 
     const retried = await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token });
     expect(retried.status).toBe(201);
-    expect(await invitationStatus(invitation.id)).toBe('pending'); // sign-up never consumes; acceptance does
-    expect((await request(app).post(`/api/invitations/accept/${invitation.token}`).set(authHeader(retried.body.token))).status).toBe(200);
+    expect(await invitationStatus(invitation.id)).toBe('accepted'); // only a successful sign-up consumes it
+    expect((await request(app).post(`/api/invitations/accept/${invitation.token}`).set(authHeader(retried.body.token))).status).toBe(200); // harmless follow-up
     expect(await invitationStatus(invitation.id)).toBe('accepted');
   });
 
-  it('#8 concurrent sign-ups on one invitation: exactly one account, invitation left pending', async () => {
+  it('#8 concurrent sign-ups on one invitation: exactly one account, which accepted the invitation', async () => {
     const email = uniqueEmail();
     const invitation = await invite(email);
     const forms = [email, email, upper(email), capitalised(email), email.replace('@example.com', '@EXAMPLE.COM')];
     const results = await Promise.all(forms.map((form) => signup({ username: uniqueUsername(), email: form, password: PASSWORD, inviteToken: invitation.token })));
     expect(results.map((r) => r.status).sort()).toEqual([201, 400, 400, 400, 400]);
     expect(await accountsFor(email)).toBe(1);
-    expect(await invitationStatus(invitation.id)).toBe('pending');
+    expect(await invitationStatus(invitation.id)).toBe('accepted');
   });
 
   it('#8b concurrent sign-ups and a revocation on one invitation: at most one account, and only if it won', async () => {

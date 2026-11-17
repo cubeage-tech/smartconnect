@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import axios from 'axios';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { toast } from 'react-toastify';
@@ -15,7 +15,7 @@ import { LoginPage } from '../pages/auth/LoginPage';
  */
 
 const auth = vi.hoisted(() => ({
-  user: null as null | { id: string; username: string; role: 'USER' | 'ADMIN' },
+  user: null as null | { id: string; username: string; role: 'USER' | 'ADMIN'; email?: string },
   loading: false,
   login: async () => undefined,
   signup: async () => undefined,
@@ -91,12 +91,13 @@ afterEach(() => {
 });
 
 describe('LoginPage invitation tokens (FA-SEC-04)', () => {
-  it('signed in: a valid invitation is accepted once and lands in the workspace', async () => {
-    auth.user = ADMIN;
-    api.post.mockResolvedValue({ data: { workspaceId: 'ws1', generalChannelId: 'ch1' } });
+  // An existing account decides: the link opens the invitation's own page
+  // (accept or decline) — nothing is accepted just because a link was opened.
+  it('signed in: a valid invitation opens its accept/decline page — nothing is accepted automatically', async () => {
+    auth.user = { id: 'u1', username: 'ann', role: 'USER' };
     render(tree(`/login?inviteToken=${TOKEN}`));
-    await waitFor(() => expect(where()).toBe('/ws1/c/ch1'));
-    expect(api.post.mock.calls).toEqual([[`/api/invitations/accept/${TOKEN}`]]);
+    await waitFor(() => expect(where()).toBe(`/invite/${TOKEN}`));
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it('signed in: crafted tokens are refused without any request', async () => {
@@ -124,14 +125,32 @@ describe('LoginPage invitation tokens (FA-SEC-04)', () => {
     expect(where()).toBe('/');
   });
 
-  it('signed out: a valid invitation is accepted right after sign-in', async () => {
-    api.post.mockResolvedValue({ data: { workspaceId: 'ws1', generalChannelId: 'ch1' } });
+  it('signed out: right after sign-in, a valid invitation opens its accept/decline page', async () => {
     const { rerender } = render(tree(`/login?inviteToken=${TOKEN}`));
     expect(api.post).not.toHaveBeenCalled();
     auth.user = { id: 'u1', username: 'ann', role: 'USER' };
     await act(async () => rerender(tree(`/login?inviteToken=${TOKEN}`)));
+    await waitFor(() => expect(where()).toBe(`/invite/${TOKEN}`));
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  // A new person: the sign-up itself accepted the invitation (server side);
+  // the page confirms it (idempotent) and opens the invited workspace.
+  it('right after sign-up from an invitation link, lands in the invited workspace', async () => {
+    api.post.mockResolvedValue({ data: { workspaceId: 'ws1', generalChannelId: 'ch1' } });
+    const { rerender } = render(tree(`/signup?inviteToken=${TOKEN}&email=new%40example.com`));
+    expect(api.post).not.toHaveBeenCalled();
+    auth.user = { id: 'u2', username: 'neo', role: 'USER' }; // the sign-up succeeded on this page
+    await act(async () => rerender(tree(`/signup?inviteToken=${TOKEN}&email=new%40example.com`)));
     await waitFor(() => expect(where()).toBe('/ws1/c/ch1'));
     expect(api.post.mock.calls).toEqual([[`/api/invitations/accept/${TOKEN}`]]);
+  });
+
+  it('already signed in when opening a sign-up invitation link: asks first instead of accepting', async () => {
+    auth.user = { id: 'u1', username: 'ann', role: 'USER' };
+    render(tree(`/signup?inviteToken=${TOKEN}&email=new%40example.com`));
+    await waitFor(() => expect(where()).toBe(`/invite/${TOKEN}`));
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it('the join-link flow is unchanged (its token travels in the request body)', async () => {
@@ -148,14 +167,40 @@ describe('InviteHandler invitation tokens (FA-SEC-04)', () => {
     data: { valid: true, email, workspaceId: 'ws1', workspaceName: 'Apollo', isExistingUser },
   });
 
-  it('signed in, existing account: looked up, accepted and lands in the workspace', async () => {
+  it('signed in, existing account: looked up and shown — accepted only on "Accept invitation", then lands in the workspace', async () => {
     auth.user = { id: 'u1', username: 'ann', role: 'USER' };
     api.get.mockResolvedValue(lookup(true));
     api.post.mockResolvedValue({ data: { workspaceId: 'ws1', generalChannelId: 'ch1' } });
     render(tree(`/invite/${TOKEN}`));
-    await waitFor(() => expect(where()).toBe('/ws1/c/ch1'));
+    expect(await screen.findByRole('heading', { name: 'Join Apollo' })).toBeInTheDocument();
+    expect(screen.getByText(/ann@example\.com/)).toBeInTheDocument();
     expect(api.get.mock.calls).toEqual([[`/api/invitations/${TOKEN}`]]);
+    expect(api.post).not.toHaveBeenCalled(); // opening the link granted nothing
+    fireEvent.click(screen.getByRole('button', { name: 'Accept invitation' }));
+    await waitFor(() => expect(where()).toBe('/ws1/c/ch1'));
     expect(api.post.mock.calls).toEqual([[`/api/invitations/accept/${TOKEN}`]]);
+  });
+
+  it('signed in, existing account: "Decline" declines it, accepts nothing and goes home', async () => {
+    auth.user = { id: 'u1', username: 'ann', role: 'USER' };
+    api.get.mockResolvedValue(lookup(true));
+    api.post.mockResolvedValue({ data: { id: 'i1', state: 'declined' } });
+    render(tree(`/invite/${TOKEN}`));
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+    await waitFor(() => expect(where()).toBe('/'));
+    expect(api.post.mock.calls).toEqual([[`/api/invitations/decline/${TOKEN}`]]);
+    expect(toast.success).toHaveBeenCalledWith('Invitation to Apollo declined.');
+  });
+
+  it('signed in as a different account: says so and offers neither accept nor decline', async () => {
+    auth.user = { id: 'u3', username: 'zoe', role: 'USER', email: 'zoe@example.com' } as typeof auth.user;
+    api.get.mockResolvedValue(lookup(true));
+    render(tree(`/invite/${TOKEN}`));
+    expect(await screen.findByRole('heading', { name: 'This invitation is for another account' })).toBeInTheDocument();
+    expect(screen.getByText(/ann@example\.com/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept invitation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decline' })).not.toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
   });
 
   it('signed out, existing account: redirected to login with the token intact in the query', async () => {
