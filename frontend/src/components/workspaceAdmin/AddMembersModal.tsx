@@ -1,4 +1,4 @@
-import { Check, Search, UserPlus, Users } from 'lucide-react';
+import { Check, Search, Send, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { errorMessage, workspacesApi } from '../../lib/api';
 import type { MemberCandidate } from '../../lib/api/workspaces';
@@ -6,21 +6,24 @@ import { Button, EmptyState, Spinner, TextInput } from '../ui';
 import { Modal } from '../ui/Modal';
 
 /**
- * P2: a workspace manager adds existing registered accounts directly — no
- * e-mail and no invitation link. Only this workspace is granted; the server
- * re-checks the manager's rights and refuses duplicates or inactive accounts.
+ * P2: a workspace manager finds existing registered accounts and invites them
+ * — the same workspace invitation as People → Add members. Nobody joins
+ * behind their back: they accept (or decline) it in SmartConnect, and only
+ * then become a MEMBER of this workspace. The server re-checks the manager's
+ * rights and refuses members, inactive accounts and unknown ids; a repeat
+ * returns the invitation already pending.
  */
-export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onAdded }: {
+export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onInvited }: {
   workspaceId: string;
   workspaceName: string;
   onClose: () => void;
-  onAdded: () => void;
+  onInvited: () => void;
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MemberCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [state, setState] = useState<Record<string, 'adding' | 'added' | string>>({});
+  const [state, setState] = useState<Record<string, 'inviting' | 'invited' | 'pending' | string>>({});
   const ticket = useRef(0);
 
   useEffect(() => {
@@ -46,19 +49,19 @@ export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onAdded }
     return () => clearTimeout(timer);
   }, [query, workspaceId]);
 
-  const add = async (candidate: MemberCandidate) => {
-    setState((s) => ({ ...s, [candidate.id]: 'adding' }));
+  const invite = async (candidate: MemberCandidate) => {
+    setState((s) => ({ ...s, [candidate.id]: 'inviting' }));
     try {
-      await workspacesApi.addWorkspaceMember(workspaceId, candidate.id);
-      setState((s) => ({ ...s, [candidate.id]: 'added' }));
-      onAdded();
+      const result = await workspacesApi.inviteRegisteredUser(workspaceId, candidate.id);
+      setState((s) => ({ ...s, [candidate.id]: result.duplicate ? 'pending' : 'invited' }));
+      onInvited();
     } catch (err) {
-      setState((s) => ({ ...s, [candidate.id]: errorMessage(err, 'Could not add this person.') }));
+      setState((s) => ({ ...s, [candidate.id]: errorMessage(err, 'Could not invite this person.') }));
     }
   };
 
   return (
-    <Modal title="Add people" subtitle={`Add registered colleagues to ${workspaceName}. They get access right away.`} onClose={onClose} footer={<Button onClick={onClose}>Done</Button>}>
+    <Modal title="Add people" subtitle={`Invite registered colleagues to ${workspaceName}. They join when they accept the invitation in SmartConnect.`} onClose={onClose} footer={<Button onClick={onClose}>Done</Button>}>
       <div className="space-y-4">
         <label className="relative block">
           <span className="sr-only">Search people</span>
@@ -76,7 +79,7 @@ export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onAdded }
           <ul aria-label="People you can add" className="divide-y divide-line border border-line rounded-xl overflow-hidden">
             {results.map((c) => {
               const status = state[c.id];
-              const failed = status && status !== 'adding' && status !== 'added' ? status : null;
+              const failed = status && status !== 'inviting' && status !== 'invited' && status !== 'pending' ? status : null;
               return (
                 <li key={c.id} className="flex items-center gap-3 px-3 py-2.5 bg-surface">
                   <div className="w-9 h-9 rounded-lg bg-brand-muted text-brand font-bold flex items-center justify-center shrink-0" aria-hidden="true">
@@ -87,11 +90,13 @@ export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onAdded }
                     <div className="text-xs text-fg-subtle truncate">@{c.username}</div>
                     {failed && <div role="alert" className="text-xs text-danger mt-0.5">{failed}</div>}
                   </div>
-                  {status === 'added' ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-success"><Check size={14} aria-hidden="true" /> Added</span>
+                  {status === 'invited' || status === 'pending' ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
+                      <Check size={14} aria-hidden="true" /> {status === 'pending' ? 'Already invited' : 'Invitation sent'}
+                    </span>
                   ) : (
-                    <Button size="sm" variant="secondary" loading={status === 'adding'} icon={<UserPlus size={14} aria-hidden="true" />} onClick={() => add(c)} aria-label={`Add ${c.username}`}>
-                      Add
+                    <Button size="sm" variant="secondary" loading={status === 'inviting'} icon={<Send size={14} aria-hidden="true" />} onClick={() => invite(c)} aria-label={`Invite ${c.username}`}>
+                      Invite
                     </Button>
                   )}
                 </li>

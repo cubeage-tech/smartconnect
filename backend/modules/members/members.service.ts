@@ -15,10 +15,12 @@ import {
   isGeneralChannelName,
   loadHierarchyActor,
   loadWorkspaceActor,
+  normalizeEmail,
   projectChannelAccessWhere,
   visibleEmail,
 } from '../../lib/policy';
 import { SYSTEM_USER_EMAIL } from '../../lib/sharedWorkspace';
+import { createInvitationForAddress } from '../invitations/invitations.service';
 import { Prisma } from '@prisma/client';
 import { emitToWorkspace } from '../../sockets/registry';
 import { assertCanLeaveChannel } from '../channels/channelManagement.service';
@@ -144,10 +146,12 @@ export const getMemberProfile = async (viewer: DirectoryViewer, workspaceId: str
   };
 };
 
-// ---- Direct membership (P2) -------------------------------------------------
+// ---- Adding registered accounts (P2) ----------------------------------------
 // A workspace manager (lib/policy 'workspace.manageInvitations': workspace
-// OWNER/ADMIN or organization OWNER/ADMIN; never the shared workspace) adds an
-// existing registered account straight to the workspace — no e-mail, no link.
+// OWNER/ADMIN or organization OWNER/ADMIN; never the shared workspace) finds
+// existing registered accounts and invites them. Nobody joins behind their
+// back: they accept (or decline) the invitation in the app, like every other
+// existing-account invitation (invitations.service).
 
 const RESERVED_LOGINS = [SYSTEM_USER_EMAIL, 'deleted-user@system.internal'];
 
@@ -177,54 +181,37 @@ export const searchMemberCandidates = async (actorId: string, workspaceId: strin
   return { users: users.map((u) => ({ id: u.id, username: u.username, displayName: u.profile?.displayName ?? null })) };
 };
 
-/** POST /api/workspaces/:workspaceId/members { userId } — add as MEMBER (+ General) in one transaction. */
+/**
+ * POST /api/workspaces/:workspaceId/members { userId } — Settings → Members →
+ * Add people. Creates the same workspace invitation as People → Add members
+ * (invitations.service createInvitationForAddress): in the app at once, and
+ * by e-mail when the account's login is an address and a provider is set up.
+ * The account joins (MEMBER + General) only when it accepts. Its login and
+ * the invitation link are never returned to the manager (FA-SEC-03).
+ */
 export const addWorkspaceMember = async (actorId: string, workspaceId: string, userId: unknown) => {
   const actor = await loadWorkspaceActor(actorId, workspaceId);
   assertWorkspace(actor, 'workspace.manageInvitations');
   if (!isUuid(userId)) throw new HttpError(400, 'Choose a registered user to add.');
   const target = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, email: true, status: true, profile: { select: { displayName: true, title: true } } },
+    select: { id: true, username: true, email: true, status: true, profile: { select: { displayName: true } } },
   });
   if (!target || RESERVED_LOGINS.includes(target.email)) throw new HttpError(404, 'User not found.');
   if (!canJoinWorkspaces(target)) throw new HttpError(409, 'That account is not active and cannot join this workspace.');
-  const general = await prisma.channel.findFirst({
-    where: { workspaceId, isDM: false, name: { equals: 'General', mode: 'insensitive' } },
-    select: { id: true },
-  });
-  if (!general) throw new HttpError(500, 'This workspace has no "General" channel to add the user to.');
-
-  let joinedAt: Date;
-  try {
-    joinedAt = await prisma.$transaction(async (tx) => {
-      const member = await tx.workspaceMember.create({ data: { userId: target.id, workspaceId, role: 'MEMBER' }, select: { createdAt: true } });
-      await tx.channelMember.upsert({
-        where: { userId_channelId: { userId: target.id, channelId: general.id } },
-        update: {},
-        create: { userId: target.id, channelId: general.id, role: 'member' },
-      });
-      return member.createdAt;
-    });
-  } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new HttpError(409, `${target.username} is already a member of this workspace.`);
-    }
-    throw err;
+  if (await prisma.workspaceMember.findUnique({ where: { userId_workspaceId: { userId: target.id, workspaceId } }, select: { id: true } })) {
+    throw new HttpError(409, `${target.username} is already a member of this workspace.`);
   }
-  await logAuditEvent(actorId, 'ADD_WORKSPACE_MEMBER', 'WORKSPACE', workspaceId, `Added ${target.username} to the workspace`);
+
+  const { status, body } = await createInvitationForAddress(normalizeEmail(target.email), actorId, workspaceId);
   return {
-    userId: target.id,
-    generalChannelId: general.id,
-    member: {
-      id: target.id,
-      username: target.username,
-      displayName: target.profile?.displayName ?? null,
-      email: visibleEmail({ id: actorId, canSeeEmails: canSeeWorkspaceMemberEmails(actor) }, target),
-      title: target.profile?.title ?? null,
-      role: 'MEMBER' as const,
-      isOwner: false,
-      joinedAt,
-      presence: await getPresenceInWorkspace(target.id, workspaceId),
+    status,
+    body: {
+      invited: true as const,
+      invitationId: body.id,
+      duplicate: (body as { duplicate?: boolean }).duplicate === true,
+      emailSent: body.emailSent,
+      user: { id: target.id, username: target.username, displayName: target.profile?.displayName ?? null },
     },
   };
 };

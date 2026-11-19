@@ -116,6 +116,27 @@ describe('Team Management (Stage 2)', () => {
     expect(JSON.stringify({ ...localStorage, ...sessionStorage })).not.toContain(CREDENTIALS.temporaryPassword);
   });
 
+  it('says whether the activation e-mail went out — sent, not configured, or failed — and keeps the details to share either way', async () => {
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ emailSent: true }, /An activation e-mail with these details was sent to nadia@acme\.io/],
+      [{ emailSent: false, emailUnavailable: true }, /No e-mail was sent — e-mail delivery isn't configured on this server/],
+      [{ emailSent: false }, /The activation e-mail could not be sent/],
+    ];
+    for (const [delivery, says] of cases) {
+      api.get.mockResolvedValue({ data: { teamLeads: [] } });
+      api.post.mockResolvedValueOnce({ data: { teamLead: lead('u6', 'Nadia', 'PENDING', { status: 'SUSPENDED' }), credentials: { ...CREDENTIALS, loginId: 'nadia@acme.io' }, delivery } });
+      const { unmount } = render(<TeamManagement />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add Team Lead' }));
+      const dialog = screen.getByRole('dialog', { name: 'Add Team Lead' });
+      fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: 'nadia@acme.io' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Create Team Lead' }));
+      const shown = await screen.findByRole('dialog', { name: 'Team Lead invitation' });
+      expect(shown).toHaveTextContent(says);
+      expect(within(shown).getByText(CREDENTIALS.temporaryPassword)).toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it('shows why an add failed (for example, a duplicate e-mail) and keeps the form open', async () => {
     api.post.mockRejectedValueOnce({ response: { status: 409, data: { error: 'An account with this e-mail address already exists.' } } });
     render(<TeamManagement />);

@@ -6,7 +6,7 @@ import type { Workspace } from '../../types';
 import { AddMembersModal } from '../workspaceAdmin/AddMembersModal';
 import { UserManagement } from './UserManagement';
 
-/** P2 — admin provisioning UI, direct "Add people", and the access-grouped workspace rail. */
+/** P2 — admin provisioning UI, "Add people" (an invitation the person accepts), and the access-grouped workspace rail. */
 
 vi.mock('axios', () => ({
   default: {
@@ -115,26 +115,37 @@ describe('Admin user management (P2)', () => {
 });
 
 describe('Add people (P2)', () => {
-  it('searches registered accounts and adds one directly', async () => {
+  it('searches registered accounts and invites one — they join only when they accept', async () => {
     api.get.mockResolvedValue({ data: { users: [{ id: 'u9', username: 'bee', displayName: 'Bee Kay' }] } });
-    api.post.mockResolvedValue({ data: { id: 'u9', username: 'bee', role: 'MEMBER' } });
-    const onAdded = vi.fn();
-    render(<AddMembersModal workspaceId="ws1" workspaceName="Acme" onClose={vi.fn()} onAdded={onAdded} />);
+    api.post.mockResolvedValue({ data: { invited: true, invitationId: 'inv1', duplicate: false, emailSent: false, user: { id: 'u9', username: 'bee', displayName: 'Bee Kay' } } });
+    const onInvited = vi.fn();
+    render(<AddMembersModal workspaceId="ws1" workspaceName="Acme" onClose={vi.fn()} onInvited={onInvited} />);
+    expect(screen.getByRole('dialog', { name: 'Add people' })).toHaveTextContent('They join when they accept the invitation in SmartConnect.');
     fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'bee' } });
     expect(await screen.findByText('Bee Kay')).toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/api/workspaces/ws1/member-candidates', { params: { q: 'bee' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add bee' }));
-    expect(await screen.findByText('Added')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite bee' }));
+    expect(await screen.findByText('Invitation sent')).toBeInTheDocument();
     expect(api.post).toHaveBeenCalledWith('/api/workspaces/ws1/members', { userId: 'u9' });
-    expect(onAdded).toHaveBeenCalledTimes(1);
+    expect(onInvited).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Added')).not.toBeInTheDocument();
   });
 
-  it('shows why an add failed', async () => {
+  it('an invitation that is already pending is shown as such', async () => {
+    api.get.mockResolvedValue({ data: { users: [{ id: 'u9', username: 'bee', displayName: null }] } });
+    api.post.mockResolvedValue({ data: { invited: true, invitationId: 'inv1', duplicate: true, emailSent: false, user: { id: 'u9', username: 'bee', displayName: null } } });
+    render(<AddMembersModal workspaceId="ws1" workspaceName="Acme" onClose={vi.fn()} onInvited={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'bee' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Invite bee' }));
+    expect(await screen.findByText('Already invited')).toBeInTheDocument();
+  });
+
+  it('shows why an invitation failed', async () => {
     api.get.mockResolvedValue({ data: { users: [{ id: 'u9', username: 'bee', displayName: null }] } });
     api.post.mockRejectedValue({ response: { status: 409, data: { error: 'bee is already a member of this workspace.' } } });
-    render(<AddMembersModal workspaceId="ws1" workspaceName="Acme" onClose={vi.fn()} onAdded={vi.fn()} />);
+    render(<AddMembersModal workspaceId="ws1" workspaceName="Acme" onClose={vi.fn()} onInvited={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Search people'), { target: { value: 'bee' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Add bee' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Invite bee' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('bee is already a member of this workspace.');
   });
 });

@@ -14,7 +14,7 @@ Team Leads.
 | API + real time | Node.js 22, Express 4, TypeScript (run with `tsx`), Socket.IO 4 | `backend/` |
 | Database | PostgreSQL 16 via Prisma 6 (one schema, migrations in `backend/prisma/migrations`) | `backend/prisma/` |
 | Files | Cloudinary — private (authenticated) uploads, short-lived signed links | `backend/lib/attachments.ts` |
-| E-mail | Resend HTTP API | `backend/utils/mailer.ts` |
+| E-mail | Brevo transactional e-mail API (HTTPS, never SMTP) | `backend/utils/mailer.ts` |
 | Calls | WebRTC mesh; STUN/TURN servers come from the backend (`/api/calls/ice-servers`) | `frontend/src/components/chat/CallOverlay.tsx` |
 | Deployment | Render blueprint (`render.yaml`): one web service + one static site | repository root |
 
@@ -51,8 +51,9 @@ Development data (never in production): `SEED_USER_PASSWORD=… SEED_ADMIN_PASSW
 | `JWT_SECRET` | yes | Signs session tokens — a long random value |
 | `APP_URL` | production | The frontend's public URL (CORS, Socket.IO origin, links in e-mails) |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | yes | File storage |
-| `RESEND_API_KEY` | for e-mail | Invitations and password resets |
-| `EMAIL_FROM` | optional | Sender on a domain verified in Resend (default: Resend's test sender, which only delivers to the Resend account owner) |
+| `BREVO_API_KEY` | for e-mail | Brevo API key (`xkeysib-…`): invitations, account activation and password-reset e-mails |
+| `BREVO_FROM_EMAIL` | for e-mail | Sender address verified in Brevo — a plain address such as `no-reply@your-domain`. Without it (or the key) no e-mail is sent and the app says so |
+| `BREVO_FROM_NAME` | optional | Sender name (default `SmartConnect`) |
 | `CALL_TURN_URLS` + `CALL_TURN_SECRET` (or `CALL_TURN_USERNAME` / `CALL_TURN_CREDENTIAL`) | recommended | TURN relay so calls connect on restrictive networks |
 | `CALL_STUN_URLS`, `CALL_TURN_TTL_SECONDS`, `CALL_MAX_PARTICIPANTS`, `TRUST_PROXY`, `PORT` | optional | See the comments in `backend/lib/iceServers.ts`, `backend/config/` |
 

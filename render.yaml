@@ -57,16 +57,23 @@ services:
         sync: false
       - key: CLOUDINARY_API_SECRET
         sync: false
-      # Gmail SMTP is gone — Render's free tier silently blocks/times-out
-      # outbound SMTP (both 587 and 465), so email now goes through Resend's
-      # HTTP API instead. Paste the API key from resend.com/api-keys here.
-      - key: RESEND_API_KEY
+      # E-mail goes through Brevo's transactional HTTP API over HTTPS — never
+      # SMTP: Render's free tier silently blocks/times-out outbound SMTP (both
+      # 587 and 465). Paste a Brevo API key here (SMTP & API → API keys; it
+      # starts with xkeysib-, not an SMTP key). If Brevo's "Authorised IPs"
+      # blocking is on, allow Render's outbound IPs or every send is refused.
+      - key: BREVO_API_KEY
         sync: false
-      # Optional sender, e.g. "SmartConnect <no-reply@your-verified-domain>" —
-      # the domain must be verified in Resend. Leave blank to use Resend's
-      # shared test sender (delivers only to the Resend account owner).
-      - key: EMAIL_FROM
+      # Sender address, e.g. no-reply@your-verified-domain — a sender (or
+      # domain) verified in Brevo. A plain address: the display name is
+      # BREVO_FROM_NAME. Required together with BREVO_API_KEY
+      # (lib/emailDelivery.ts): without either, no e-mail is sent, the app
+      # says so, and the startup log names what is missing.
+      - key: BREVO_FROM_EMAIL
         sync: false
+      # Sender name recipients see (optional; the code defaults to it too).
+      - key: BREVO_FROM_NAME
+        value: SmartConnect
       # Calls: a TURN relay (e.g. a coturn server with use-auth-secret) lets
       # calls connect behind strict NATs/firewalls. Optional — leave empty to
       # use STUN only (calls then work on open networks only). Comma-separated

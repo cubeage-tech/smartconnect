@@ -114,7 +114,7 @@ export const WorkspaceMembersPanel = ({ workspaceId, settings, access, viewerId,
   return (
     <div className="space-y-4">
       {dialog}
-      {adding && <AddMembersModal workspaceId={workspaceId} workspaceName={settings.name} onClose={() => setAdding(false)} onAdded={refresh} />}
+      {adding && <AddMembersModal workspaceId={workspaceId} workspaceName={settings.name} onClose={() => setAdding(false)} onInvited={refresh} />}
       {addingNew && (
         <AddTeamMemberModal
           workspaceId={workspaceId}
@@ -125,10 +125,9 @@ export const WorkspaceMembersPanel = ({ workspaceId, settings, access, viewerId,
             setProvisioned(result);
             setActivationsKey((k) => k + 1);
           }}
-          onAddedExisting={() => {
-            setAddingNew(false);
+          onChanged={() => {
             refresh();
-            toast.success('Added to the workspace.');
+            setActivationsKey((k) => k + 1);
           }}
         />
       )}

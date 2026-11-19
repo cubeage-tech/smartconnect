@@ -1,6 +1,7 @@
 import { KeyRound, RotateCcw, ShieldCheck, UserPlus, Users, XCircle } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { errorMessage, teamManagementApi } from '../../lib/api';
+import { activationEmailNote } from '../../lib/api/teamManagement';
 import type { InvitationStatus, ProvisionResult, TeamLead } from '../../lib/api/teamManagement';
 import { Badge, Button, EmptyState, ErrorState, Field, LoadingState, Modal, OneTimeCredentialsModal, TextInput, useConfirm } from '../ui';
 import type { BadgeTone } from '../ui';
@@ -270,7 +271,7 @@ export const TeamManagement = () => {
       {shown && (
         <OneTimeCredentialsModal
           title="Team Lead invitation"
-          subtitle={`For ${nameOf(shown.teamLead)}. Share it privately — anyone with both the link and the temporary password can activate this account.`}
+          subtitle={`For ${nameOf(shown.teamLead)}. ${activationEmailNote(shown.delivery, shown.credentials.loginId)} Share it privately — anyone with both the link and the temporary password can activate this account.`}
           intro="You've been added to SmartConnect as a Team Lead."
           credentials={shown.credentials}
           onClose={() => setShown(null)}

@@ -95,6 +95,16 @@ export interface MemberCandidate {
 export const searchMemberCandidates = (workspaceId: string, q: string) =>
   http.get<{ users: MemberCandidate[] }>(`/api/workspaces/${seg(workspaceId)}/member-candidates`, { q });
 
-/** Adds an existing account directly as a MEMBER (no e-mail, no invitation link). */
-export const addWorkspaceMember = (workspaceId: string, userId: string) =>
-  http.post<WorkspaceMember>(`/api/workspaces/${seg(workspaceId)}/members`, { userId });
+/** Settings → Members → Add people: the invitation created for an existing account (never its login or link). */
+export interface RegisteredUserInvitation {
+  invited: true;
+  invitationId: string;
+  /** True when an invitation was already pending — it is returned instead of a new one. */
+  duplicate: boolean;
+  emailSent: boolean;
+  user: { id: string; username: string; displayName: string | null };
+}
+
+/** Invites an existing account to the workspace; it joins as a MEMBER when it accepts. */
+export const inviteRegisteredUser = (workspaceId: string, userId: string) =>
+  http.post<RegisteredUserInvitation>(`/api/workspaces/${seg(workspaceId)}/members`, { userId });

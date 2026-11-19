@@ -67,7 +67,7 @@ export const loginLimiter = createLimiter('login', {
 });
 
 // T.32 (audit M1): the public password-reset endpoints were unthrottled — an
-// open door for e-mail bombing (and burning Resend quota) and for guessing.
+// open door for e-mail bombing (and burning the e-mail provider's quota) and for guessing.
 // Per IP, like the limiters above; exported counts are used by the tests.
 export const FORGOT_PASSWORD_LIMIT = 5;
 export const forgotPasswordLimiter = createLimiter('forgot-password', {

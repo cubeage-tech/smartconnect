@@ -140,3 +140,17 @@ export const apiAs = (request: APIRequestContext, token: string) => ({
   put: (path: string, data?: unknown) => request.put(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` }, data }),
   patch: (path: string, data?: unknown) => request.patch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` }, data }),
 });
+
+/**
+ * Adding an existing account (Settings → Members → Add people, or People →
+ * Add members) invites it; it joins when it accepts. Setup helper: the
+ * invited account accepts its pending invitation to `workspaceId` through the
+ * same API its in-app "Workspace invitations" list uses.
+ */
+export const acceptInvitationTo = async (request: APIRequestContext, token: string, workspaceId: string) => {
+  const received = (await (await apiAs(request, token).get('/api/invitations/received')).json()) as { id: string; workspace: { id: string } }[];
+  const invitation = received.find((r) => r.workspace.id === workspaceId);
+  expect(invitation, 'a pending invitation to that workspace').toBeTruthy();
+  const accepted = await apiAs(request, token).post(`/api/invitations/received/${invitation!.id}/accept`);
+  expect(accepted.status(), await accepted.text()).toBe(200);
+};

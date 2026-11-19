@@ -2,12 +2,14 @@ import bcrypt from 'bcryptjs';
 import { AccountInvitationStatus, AccountTier, Prisma } from '@prisma/client';
 import { APP_URL } from '../../config/env';
 import { logAuditEvent } from '../../lib/auditLog';
+import { emailDeliveryConfigured } from '../../lib/emailDelivery';
 import { isValidEmail } from '../../lib/email';
 import { HttpError } from '../../lib/httpError';
 import { findUserIdByEmail, findUserIdByUsername } from '../../lib/identity';
 import { isUuid } from '../../lib/messageInput';
 import { prisma } from '../../lib/prisma';
 import { SYSTEM_USER_EMAIL } from '../../lib/sharedWorkspace';
+import { sendAccountInvitationEmail } from '../../utils/mailer';
 import {
   BCRYPT_COST,
   credentialFingerprint,
@@ -143,6 +145,42 @@ export const credentialsResponse = (loginId: string, issued: Awaited<ReturnType<
   expiresAt: issued.expiresAt,
 });
 
+/** What happened to the activation e-mail — the one-time credentials go to the creator either way. */
+export type AccountInvitationDelivery = { emailSent: boolean; emailUnavailable?: true };
+
+/**
+ * E-mails a newly provisioned account (Team Lead, or Member of
+ * `workspaceName`) its login, temporary password and activation link.
+ * Existing accounts never come through here: they get workspace invitations
+ * (invitations.service). Delivery is reported, never assumed: with no e-mail
+ * provider, or if sending fails, the account still exists awaiting
+ * activation and its creator holds the one-time credentials to hand over
+ * (or reissues them). The secrets are never logged.
+ */
+export const emailAccountInvitation = async (
+  role: 'TEAM_LEAD' | 'MEMBER',
+  loginId: string,
+  issued: Awaited<ReturnType<typeof issueCredentials>>,
+  workspaceName: string | null
+): Promise<AccountInvitationDelivery> => {
+  if (!emailDeliveryConfigured()) return { emailSent: false, emailUnavailable: true };
+  try {
+    await sendAccountInvitationEmail({
+      to: loginId,
+      role,
+      loginId,
+      temporaryPassword: issued.temporaryPassword,
+      activationUrl: activationUrl(issued.token),
+      expiresAt: issued.expiresAt,
+      workspaceName,
+    });
+    return { emailSent: true };
+  } catch (err) {
+    console.error(`Account invitation e-mail to ${loginId} failed:`, err instanceof Error ? err.message : 'unknown error');
+    return { emailSent: false };
+  }
+};
+
 /** POST /api/team-management/team-leads { email, displayName?, teamLabel? } */
 export const provisionTeamLead = async (adminId: string, body: Record<string, unknown> | undefined) => {
   // Only these three fields are read; anything else in the body (role, tier,
@@ -163,7 +201,8 @@ export const provisionTeamLead = async (adminId: string, body: Record<string, un
     userId,
     `Provisioned Team Lead "${username}" (login ${email})${teamLabel ? ` for "${teamLabel}"` : ''}; invitation expires ${issued.expiresAt.toISOString()}`
   );
-  return { teamLead: await loadTeamLead(userId), credentials: credentialsResponse(email, issued) };
+  const delivery = await emailAccountInvitation('TEAM_LEAD', email, issued, null);
+  return { teamLead: await loadTeamLead(userId), credentials: credentialsResponse(email, issued), delivery };
 };
 
 /**
@@ -258,7 +297,8 @@ export const revokeInvitation = async (adminId: string, invitationId: unknown) =
  */
 export const reissueInvitation = async (adminId: string, userId: unknown) => {
   const { email, issued, userId: id } = await reissueAccountInvitation(adminId, userId, { tier: 'TEAM_LEAD', workspaceId: null });
-  return { teamLead: await loadTeamLead(id), credentials: credentialsResponse(email, issued) };
+  const delivery = await emailAccountInvitation('TEAM_LEAD', email, issued, null);
+  return { teamLead: await loadTeamLead(id), credentials: credentialsResponse(email, issued), delivery };
 };
 
 /**

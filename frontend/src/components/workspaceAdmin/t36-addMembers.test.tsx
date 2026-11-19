@@ -50,33 +50,34 @@ const renderPeople = () =>
   );
 
 describe('People page: Add member', () => {
-  it('a Team Lead who manages the workspace gets "Add member", which opens the new-account dialog with the role shown as Member', async () => {
+  it('a Team Lead who manages the workspace gets "Add members", which opens the add dialog with the role shown as Member', async () => {
     renderPeople();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add member' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Add team member' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Add members' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Add members' });
     expect(within(dialog).getByLabelText('Role')).toHaveValue('Member');
     expect(within(dialog).getByLabelText('Role')).toHaveAttribute('readonly');
-    expect(dialog).toHaveTextContent(/No e-mail is sent/);
+    // E-mail is reported per address after sending — never promised up front.
+    expect(dialog).toHaveTextContent(/e-mailed to them when this server can send e-mail/);
   });
 
   it('a manager who is not a Team Lead adds existing accounts instead', async () => {
     h.hierarchy = { role: 'MEMBER', canCreateWorkspaces: false, canProvisionMembers: false };
     renderPeople();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add member' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add members' }));
     expect(await screen.findByRole('dialog', { name: 'Add people' })).toBeInTheDocument();
-    expect(screen.queryByRole('dialog', { name: 'Add team member' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Add members' })).not.toBeInTheDocument();
   });
 
   it('no button for people who cannot manage members, or in SmartConnect Collab', async () => {
     h.workspace = managedWorkspace({ isOwner: false, capabilities: { canManage: false, canManageInvitations: false } });
     const { unmount } = renderPeople();
     await waitFor(() => expect(api.get).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add members' })).not.toBeInTheDocument();
     unmount();
     h.workspace = managedWorkspace({ isDefault: true });
     renderPeople();
     await waitFor(() => expect(api.get).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add members' })).not.toBeInTheDocument();
   });
 
   it('a created member is shown as a clear one-time result: account created, joins on activation, no e-mail', async () => {
@@ -90,10 +91,10 @@ describe('People page: Add member', () => {
       },
     });
     renderPeople();
-    fireEvent.click(await screen.findByRole('button', { name: 'Add member' }));
-    const form = await screen.findByRole('dialog', { name: 'Add team member' });
-    fireEvent.change(within(form).getByLabelText('E-mail address'), { target: { value: 'mia@acme.io' } });
-    fireEvent.click(within(form).getByRole('button', { name: 'Create member' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add members' }));
+    const form = await screen.findByRole('dialog', { name: 'Add members' });
+    fireEvent.change(within(form).getByLabelText('E-mail addresses'), { target: { value: 'mia@acme.io' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Add members' }));
     const result = await screen.findByRole('dialog', { name: 'Member invitation' });
     expect(result).toHaveTextContent('Account created for Mia Chen');
     expect(result).toHaveTextContent('They join SmartUnifolio when they activate it — no e-mail is sent');
@@ -104,7 +105,7 @@ describe('People page: Add member', () => {
 
 describe('Add team member dialog', () => {
   it('shows the role as a fixed Member and never sends one', async () => {
-    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onAddedExisting={vi.fn()} />);
+    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onChanged={vi.fn()} />);
     expect(screen.getByLabelText('Role')).toHaveValue('Member');
     expect(screen.getByText(/Workspace admins must be Team Leads/)).toBeInTheDocument();
   });

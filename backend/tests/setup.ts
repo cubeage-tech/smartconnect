@@ -38,6 +38,23 @@ process.env.JWT_SECRET ??= 'test-jwt-secret-do-not-use-in-production';
 process.env.CLOUDINARY_CLOUD_NAME ??= 'test-cloud';
 process.env.CLOUDINARY_API_KEY ??= 'test-key';
 process.env.CLOUDINARY_API_SECRET ??= 'test-secret';
+// Never real e-mail from a test run: clear whatever backend/.env holds (dotenv
+// never overrides a variable that is already set, even to ''). A test that
+// needs "configured" sets a fake key and replaces the transport itself
+// (the mailer, or fetch with vi.stubGlobal).
+process.env.BREVO_API_KEY = '';
+process.env.BREVO_FROM_EMAIL = '';
+process.env.BREVO_FROM_NAME = '';
+// …and should one forget, a request to the real Brevo API fails here, before
+// leaving the machine. (vi.unstubAllGlobals restores this guard, not the raw fetch.)
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (/^https?:\/\/api\.brevo\.com(\/|$)/i.test(url)) {
+    throw new Error('Tests never call the real Brevo API: stub fetch (vi.stubGlobal) or mock the mailer.');
+  }
+  return realFetch(input, init);
+}) as typeof fetch;
 
 beforeAll(() => {
   if (!process.env.DATABASE_URL) {

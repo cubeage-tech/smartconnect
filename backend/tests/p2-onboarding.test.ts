@@ -158,7 +158,7 @@ describe('workspace creation and direct membership (P2)', () => {
     expect((await as(owner).get('/api/admin/users')).status).toBe(403);
   });
 
-  it('a manager finds a registered user (no e-mails exposed) and adds them directly — only that workspace', async () => {
+  it('a manager finds a registered user (no e-mails exposed) and invites them — they join only that workspace, and only after accepting', async () => {
     const admin = await createAndLoginUser({ role: 'ADMIN' });
     const owner = await provision(admin);
     const member = await provision(admin, { displayName: `Bee ${tag()}` });
@@ -174,13 +174,28 @@ describe('workspace creation and direct membership (P2)', () => {
     expect((await as(owner).get(`/api/workspaces/${workspaceId}/member-candidates?q=@2003`)).body.users).toEqual([]); // no substring login search
     expect((await as(member).get(`/api/workspaces/${workspaceId}/member-candidates?q=x`)).status).toBe(403);
 
-    // Live: the member's open socket gets the workspace and its General right away.
+    // "Add people" invites: the person's open socket hears about it at once; nothing is granted yet.
     const memberConn = await connect(member as unknown as TestUser);
-    const refreshed = nextEvent<{ workspaceId: string }>(memberConn.socket, 'workspace:member_updated', (p) => p.workspaceId === workspaceId);
-    const added = await as(owner).post(`/api/workspaces/${workspaceId}/members`, { userId: member.id });
-    expect(added.status).toBe(201);
-    expect(added.body).toMatchObject({ id: member.id, username: member.username, role: 'MEMBER', isOwner: false });
-    await refreshed;
+    const invitedLive = nextEvent<{ workspaceId: string }>(memberConn.socket, 'invitations:changed', (p) => p.workspaceId === workspaceId);
+    const invited = await as(owner).post(`/api/workspaces/${workspaceId}/members`, { userId: member.id });
+    expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+    expect(invited.body).toMatchObject({ invited: true, duplicate: false, user: { id: member.id, username: member.username } });
+    // Neither their login nor a usable link reaches the manager (FA-SEC-03).
+    expect(JSON.stringify(invited.body)).not.toContain(member.loginId as string);
+    expect(invited.body.inviteLink).toBeUndefined();
+    expect(invited.body.token).toBeUndefined();
+    await invitedLive;
+    expect(await prisma.workspaceMember.count({ where: { userId: member.id, workspaceId } })).toBe(0);
+    expect((await as(member).get(`/api/channels/${generalChannelId}/messages`)).status).toBe(403);
+    // Adding them again returns the same pending invitation.
+    const repeated = await as(owner).post(`/api/workspaces/${workspaceId}/members`, { userId: member.id });
+    expect(repeated.status).toBe(200);
+    expect(repeated.body).toMatchObject({ invited: true, duplicate: true, invitationId: invited.body.invitationId });
+
+    // Their login ("…@2003") is not an e-mail address: the in-app invitation is how they get it. They accept.
+    const received = (await as(member).get('/api/invitations/received')).body as { id: string; workspace: { id: string } }[];
+    expect(received.map((r) => r.workspace.id)).toEqual([workspaceId]);
+    expect((await as(member).post(`/api/invitations/received/${received[0].id}/accept`)).status).toBe(200);
     const ownerConn = await connect(owner as unknown as TestUser);
     const arrives = nextEvent<{ content: string }>(memberConn.socket, 'message:received', (m) => m.content.includes('welcome aboard'));
     expect((await emitAck(ownerConn.socket, 'message:send', { channelId: generalChannelId, content: '<p>welcome aboard</p>' })).ok).toBe(true);

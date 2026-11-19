@@ -67,7 +67,9 @@ export default defineConfig({
         // The SDK's standard upload_prefix setting: uploads and signed
         // downloads go to the local stand-in instead of api.cloudinary.com.
         CLOUDINARY_URL: `cloudinary://${STORAGE.apiKey}:${STORAGE.secret}@${STORAGE.cloud}?upload_prefix=http://127.0.0.1:${STORAGE_PORT}`,
-        RESEND_API_KEY: '',
+        // No e-mail provider: E2E never sends e-mail (whatever backend/.env holds).
+        BREVO_API_KEY: '',
+        BREVO_FROM_EMAIL: '',
       },
     },
     {

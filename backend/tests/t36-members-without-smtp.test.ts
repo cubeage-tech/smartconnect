@@ -12,7 +12,7 @@ import { authHeader, createAndLoginUser, createTeamLead } from './helpers';
  * The no-e-mail path already exists (Stage 3): a Team Lead creates a Member
  * account with a one-time activation link and temporary password, or adds an
  * existing account directly. What was wrong: with no e-mail provider
- * configured (RESEND_API_KEY unset), an e-mail invitation still answered
+ * configured (BREVO_API_KEY unset), an e-mail invitation still answered
  * "Invite sent successfully" — the mailer returned { success: false } instead
  * of throwing, and the result was ignored.
  */
@@ -32,15 +32,23 @@ const as = (u: TestUser) => ({
 const tag = () => randomUUID().slice(0, 8);
 const login = (email: string, password: string) => request(app).post('/api/auth/login').send({ email, password });
 
-let savedKey: string | undefined;
+const EMAIL_SETTINGS = ['BREVO_API_KEY', 'BREVO_FROM_EMAIL'] as const;
+let savedSettings: Record<string, string | undefined> = {};
+/** E-mail "configured" (a fake key; the mailer is observed and tests/setup.ts refuses real Brevo requests). */
+const configureEmail = () => {
+  process.env.BREVO_API_KEY = 'xkeysib-test-not-a-real-key';
+  process.env.BREVO_FROM_EMAIL = 'no-reply@verified.example';
+};
 beforeEach(() => {
-  savedKey = process.env.RESEND_API_KEY;
-  delete process.env.RESEND_API_KEY; // no e-mail provider, as on the local dev setup
+  savedSettings = Object.fromEntries(EMAIL_SETTINGS.map((name) => [name, process.env[name]]));
+  for (const name of EMAIL_SETTINGS) delete process.env[name]; // no e-mail provider, as on the local dev setup
   vi.mocked(mailer.sendInviteEmail).mockClear();
 });
 afterEach(() => {
-  if (savedKey === undefined) delete process.env.RESEND_API_KEY;
-  else process.env.RESEND_API_KEY = savedKey;
+  for (const name of EMAIL_SETTINGS) {
+    if (savedSettings[name] === undefined) delete process.env[name];
+    else process.env[name] = savedSettings[name];
+  }
 });
 
 describe('T.36 — e-mail invitations never claim to be sent without e-mail delivery', () => {
@@ -60,7 +68,7 @@ describe('T.36 — e-mail invitations never claim to be sent without e-mail deli
   });
 
   it('with e-mail delivery configured and the e-mail accepted, it says sent', async () => {
-    process.env.RESEND_API_KEY = 're_test_not_a_real_key';
+    configureEmail();
     vi.mocked(mailer.sendInviteEmail).mockResolvedValueOnce({ success: true, messageId: 'm1' });
     const lead = await createTeamLead();
     const { workspaceId } = await createWorkspace(lead);
@@ -76,7 +84,7 @@ describe('T.36 — e-mail invitations never claim to be sent without e-mail deli
     const lead = await createTeamLead();
     const { workspaceId } = await createWorkspace(lead);
     expect((await as(lead).get(`/api/workspaces/${workspaceId}/settings`)).body.emailInvitationsAvailable).toBe(false);
-    process.env.RESEND_API_KEY = 're_test_not_a_real_key';
+    configureEmail();
     expect((await as(lead).get(`/api/workspaces/${workspaceId}/settings`)).body.emailInvitationsAvailable).toBe(true);
   });
 });
@@ -88,7 +96,7 @@ describe('T.36 — e-mail invitations never claim to be sent without e-mail deli
  */
 describe('T.36 — a Team Lead adds members with no e-mail provider', () => {
   it('creates a Member who activates, signs in, sees exactly that workspace — and nothing in the request can raise their role', async () => {
-    expect(process.env.RESEND_API_KEY).toBeUndefined();
+    expect(process.env.BREVO_API_KEY).toBeUndefined();
     const lead = await createTeamLead();
     const { workspaceId } = await createWorkspace(lead, `Team ${tag()}`);
     const other = await createTeamLead();
@@ -147,7 +155,7 @@ describe('T.36 — a Team Lead adds members with no e-mail provider', () => {
     expect([403, 404]).toContain((await request(app).patch(`/api/workspaces/${workspaceId}/members/${account.id}`).set(authHeader(member.token)).send({ role: 'ADMIN' })).status);
   });
 
-  it('adds an existing account once (no duplicate account or membership); other leads, members and the Company Admin cannot add here', async () => {
+  it('invites an existing account, which joins once it accepts (no duplicate account or membership); other leads, members and the Company Admin cannot add here', async () => {
     const lead = await createTeamLead();
     const { workspaceId } = await createWorkspace(lead, `Team ${tag()}`);
     const existing = await createAndLoginUser();
@@ -158,7 +166,12 @@ describe('T.36 — a Team Lead adds members with no e-mail provider', () => {
     expect(offered.body).toMatchObject({ existingAccount: true, user: { id: existing.user.id } });
     expect(await prisma.user.count({ where: { email: { equals: existing.user.email, mode: 'insensitive' } } })).toBe(1);
 
-    expect((await as(lead).post(`/api/workspaces/${workspaceId}/members`, { userId: existing.user.id })).status).toBe(201);
+    // Settings → Members → Add people: an invitation the account accepts — never a direct add.
+    const invited = await as(lead).post(`/api/workspaces/${workspaceId}/members`, { userId: existing.user.id });
+    expect(invited.status).toBe(201);
+    expect(invited.body).toMatchObject({ invited: true, user: { id: existing.user.id } });
+    expect(await prisma.workspaceMember.count({ where: { workspaceId, userId: existing.user.id } })).toBe(0);
+    expect((await as(existing).post(`/api/invitations/received/${invited.body.invitationId}/accept`)).status).toBe(200);
     const again = await as(lead).post(`/api/workspaces/${workspaceId}/members`, { userId: existing.user.id });
     expect(again.status).toBe(409);
     expect(again.body.error).toMatch(/already a member/);

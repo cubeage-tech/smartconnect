@@ -5,8 +5,9 @@ import { apiAs, logIn, makeTeamLead, newUser, signUp, tokenOf, trackPageErrors }
  * Stage 3 (T.22), end to end in real browsers: a Team Lead runs their own
  * workspace — creates it (with a description) from My Workspaces, provisions a
  * new Member who activates once and lands in exactly SmartConnect Collab and
- * that workspace, adds an existing account directly instead of duplicating
- * it, and revokes a pending invitation. The Member sees no management controls.
+ * that workspace, invites an existing account (which accepts it in the app)
+ * instead of duplicating it, and revokes a pending invitation. The Member sees
+ * no management controls.
  */
 const freshPage = async (browser: Browser) => (await browser.newContext()).newPage();
 const UUID = '[0-9a-f-]{36}';
@@ -27,10 +28,10 @@ const readCredentials = async (page: Page) => {
 
 const addTeamMember = async (page: Page, email: string, displayName: string) => {
   await page.getByRole('button', { name: 'Add team member' }).click();
-  const form = page.getByRole('dialog', { name: 'Add team member' });
-  await form.getByLabel('E-mail address').fill(email);
+  const form = page.getByRole('dialog', { name: 'Add members' });
+  await form.getByLabel('E-mail addresses').fill(email);
   await form.getByLabel('Display name (optional)').fill(displayName);
-  await form.getByRole('button', { name: 'Create member' }).click();
+  await form.getByRole('button', { name: 'Add members' }).click();
   return form;
 };
 
@@ -107,18 +108,22 @@ test('Stage 3: a Team Lead runs a workspace — create, provision a member who a
     expect((await api.post('/api/workspaces', { name: `Nope ${run}` })).status()).toBe(403);
   });
 
-  await test.step('5. an existing account is added directly — never a second account', async () => {
+  await test.step('5. an existing account gets a workspace invitation it accepts — never a second account, never added behind its back', async () => {
     const existing = newUser('s3existing');
     const other = await freshPage(browser);
     await signUp(other, existing);
     await other.waitForURL(new RegExp(`/${UUID}/`));
-    await other.context().close();
     const form = await addTeamMember(page, existing.email, 'Existing person');
-    await expect(form.getByText(/already has an account/)).toBeVisible();
-    await form.getByRole('button', { name: new RegExp(`^Add .* to ${workspaceName}$`) }).click();
+    await expect(form.getByText(/^Already has an account — invitation (sent|created)/)).toBeVisible();
+    await form.getByRole('button', { name: 'Done' }).click();
     await expect(form).toHaveCount(0);
-    const members = await (await apiAs(request, await tokenOf(page)).get(`/api/workspaces/${workspaceId}/members?q=${existing.username}`)).json();
-    expect(JSON.stringify(members)).toContain(existing.username);
+    const membersOf = async () => JSON.stringify(await (await apiAs(request, await tokenOf(page)).get(`/api/workspaces/${workspaceId}/members?q=${existing.username}`)).json());
+    expect(await membersOf()).not.toContain(existing.username); // not a member until they accept
+    await other.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Workspace invitations (1)' }).click();
+    await other.getByRole('dialog', { name: 'Workspace invitations' }).getByRole('button', { name: `Accept invitation to ${workspaceName}` }).click();
+    await other.waitForURL(new RegExp(`/${workspaceId}/c/`));
+    await other.context().close();
+    expect(await membersOf()).toContain(existing.username);
   });
 
   await test.step('6. the lead revokes a pending invitation', async () => {

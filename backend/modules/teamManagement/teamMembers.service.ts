@@ -7,8 +7,10 @@ import { canCreateWorkspaces, canWorkspace, loadHierarchyActor, loadWorkspaceAct
 import { prisma } from '../../lib/prisma';
 import {
   createInvitedAccount,
+  AccountInvitationDelivery,
   credentialsResponse,
   DUPLICATE,
+  emailAccountInvitation,
   INVITATION_SELECT,
   invitationView,
   parseEmail,
@@ -52,11 +54,18 @@ const toMemberInvitation = ({ user, ...invitation }: MemberInvitationRow) => ({
   account: { id: user.id, username: user.username, loginId: user.email, displayName: user.profile?.displayName ?? null, status: user.status },
 });
 
+/** The workspace a Member is invited to, named in their activation e-mail. */
+const workspaceNameOf = async (workspaceId: string) =>
+  (await prisma.workspace.findUniqueOrThrow({ where: { id: workspaceId }, select: { name: true } })).name;
+
 const loadMemberInvitation = async (id: string) =>
   toMemberInvitation(await prisma.accountInvitation.findUniqueOrThrow({ where: { id }, select: MEMBER_INVITATION_SELECT }));
 
 export type ProvisionMemberResult =
-  | { kind: 'created'; body: { invitation: ReturnType<typeof toMemberInvitation>; credentials: ReturnType<typeof credentialsResponse> } }
+  | {
+      kind: 'created';
+      body: { invitation: ReturnType<typeof toMemberInvitation>; credentials: ReturnType<typeof credentialsResponse>; delivery: AccountInvitationDelivery };
+    }
   | { kind: 'conflict'; body: Record<string, unknown> };
 
 /** POST /api/workspaces/:workspaceId/member-invitations { email, displayName? } */
@@ -103,7 +112,8 @@ export const provisionMember = async (actorId: string, rawWorkspaceId: unknown, 
     const { userId, username, issued } = await createInvitedAccount(actorId, { email, displayName, teamLabel: null, tier: 'MEMBER', workspaceId });
     const invitation = await prisma.accountInvitation.findFirstOrThrow({ where: { userId, status: 'PENDING' }, select: { id: true } });
     await logAuditEvent(actorId, 'PROVISION_MEMBER', 'USER', userId, `Provisioned member "${username}" (login ${email}) for workspace ${workspaceId}; invitation expires ${issued.expiresAt.toISOString()}`);
-    return { kind: 'created', body: { invitation: await loadMemberInvitation(invitation.id), credentials: credentialsResponse(email, issued) } };
+    const delivery = await emailAccountInvitation('MEMBER', email, issued, await workspaceNameOf(workspaceId));
+    return { kind: 'created', body: { invitation: await loadMemberInvitation(invitation.id), credentials: credentialsResponse(email, issued), delivery } };
   } catch (err) {
     // Lost a race with a concurrent submit for the same address.
     if (err instanceof HttpError && err.status === 409) {
@@ -157,7 +167,8 @@ export const reissueMemberInvitation = async (actorId: string, rawWorkspaceId: u
   const invitation = await loadScopedInvitation(workspaceId, invitationId);
   const { userId, email, issued } = await reissueAccountInvitation(actorId, invitation.userId, { tier: 'MEMBER', workspaceId });
   const fresh = await prisma.accountInvitation.findFirstOrThrow({ where: { userId, status: 'PENDING' }, select: { id: true } });
-  return { invitation: await loadMemberInvitation(fresh.id), credentials: credentialsResponse(email, issued) };
+  const delivery = await emailAccountInvitation('MEMBER', email, issued, await workspaceNameOf(workspaceId));
+  return { invitation: await loadMemberInvitation(fresh.id), credentials: credentialsResponse(email, issued), delivery };
 };
 
 /** GET /api/me/hierarchy — UI hints only (every action is re-checked on the server). */

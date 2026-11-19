@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { BrowserContext, expect, Locator, Page, test } from '@playwright/test';
-import { apiAs, createWorkspace, logIn, newUser, pageToken, sendMessage, signUp, trackPageErrors } from './helpers';
+import { acceptInvitationTo, apiAs, createWorkspace, logIn, newUser, pageToken, sendMessage, signUp, trackPageErrors } from './helpers';
 
 /**
  * T.39 — the phone and tablet experience in a real browser (Chromium with
@@ -143,7 +143,8 @@ test('phone: a member starts and completes a task; the lead assigns from the Tea
   await expect.poll(async () => pageToken(memberPage)).toBeTruthy();
   const memberId = (await (await apiAs(request, (await pageToken(memberPage))!).get('/api/auth/me')).json()).id;
   const lead = apiAs(request, token);
-  expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: memberId })).status()).toBe(201);
+  expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: memberId })).status()).toBe(201); // an invitation…
+  await acceptInvitationTo(request, (await pageToken(memberPage))!, workspaceId); // …they accept
   expect((await lead.post(`/api/workspaces/${workspaceId}/team-tasks`, { title: 'Phone task', assigneeId: memberId, priority: 'HIGH' })).status()).toBe(201);
   const errors = trackPageErrors(memberPage);
 

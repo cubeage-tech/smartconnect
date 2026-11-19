@@ -101,6 +101,18 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
   if (!isValidEmail(normalized)) {
     throw new HttpError(400, 'Invalid email format');
   }
+  return createInvitationForAddress(normalized, inviterId, workspaceId);
+};
+
+/**
+ * The invitation itself, for a validated e-mail address (createInvitation)
+ * or an existing account's own login, resolved by the server (Settings →
+ * Members → Add people, members.service) — a login may be any identifier,
+ * such as "sam@2003". One pending invitation per workspace and address; an
+ * existing account sees it in the app at once; an e-mail goes out only when
+ * the address is one and a provider is configured.
+ */
+export const createInvitationForAddress = async (normalized: string, inviterId: string, workspaceId: unknown) => {
   await assertCanManageInvitations(inviterId, workspaceId);
   const workspaceKey = workspaceId as string;
   const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: workspaceKey }, select: { name: true } });
@@ -161,6 +173,13 @@ export const createInvitation = async (email: unknown, inviterId: string, worksp
         emailUnavailable: true,
         message: 'Invitation saved, but no e-mail was sent: e-mail delivery is not configured on this server.',
       },
+    };
+  }
+  // An account whose login is not an e-mail address gets the in-app invitation only.
+  if (!isValidEmail(normalized)) {
+    return {
+      status: 201,
+      body: { ...result, emailSent: false, message: 'Invitation saved. They will see it in SmartConnect (their login is not an e-mail address).' },
     };
   }
 

@@ -143,25 +143,28 @@ test('P2: provisioning, login, Collab, private workspace, direct add, isolation,
     await expect(rail(pa).getByRole('group', { name: 'My workspaces' }).getByRole('button', { name: new RegExp(`Team ${a.username}`) })).toBeVisible();
   });
 
-  // 8 ── The owner adds B directly (search → Add); no e-mail involved.
-  await test.step('8. owner adds a registered user directly', async () => {
+  // 8 ── The owner invites B (search → Invite); B joins only by accepting.
+  await test.step('8. owner invites a registered user from Add people', async () => {
     await pa.goto(`/${teamWs}/settings?tab=members`);
     await pa.getByRole('button', { name: 'Add people' }).click();
     const dialog = pa.getByRole('dialog');
     await dialog.getByPlaceholder('Search by name, username or exact login').fill(b.username);
-    await dialog.getByRole('button', { name: `Add ${b.username}` }).click();
-    await expect(dialog.getByText('Added')).toBeVisible();
-    // C is searchable but never added.
+    await dialog.getByRole('button', { name: `Invite ${b.username}` }).click();
+    await expect(dialog.getByText('Invitation sent')).toBeVisible();
+    // C is searchable but never invited.
     await dialog.getByPlaceholder('Search by name, username or exact login').fill(c.username);
-    await expect(dialog.getByRole('button', { name: `Add ${c.username}` })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: `Invite ${c.username}` })).toBeVisible();
     await pa.keyboard.press('Escape');
   });
 
-  // 9 ── B sees the workspace under "Shared with me" and can read/post in it.
+  // 9 ── B accepts the invitation in the app, then sees the workspace under "Shared with me".
   const pb = await freshPage(browser);
   const bErrors = trackPageErrors(pb);
-  await test.step('9. added user sees it under "Shared with me"', async () => {
+  await test.step('9. invited user accepts and sees it under "Shared with me"', async () => {
     await logInWithId(pb, b);
+    await rail(pb).getByRole('button', { name: 'Workspace invitations (1)' }).click();
+    await pb.getByRole('dialog', { name: 'Workspace invitations' }).getByRole('button', { name: `Accept invitation to Team ${a.username}` }).click();
+    await pb.waitForURL(new RegExp(`/${teamWs}/c/`));
     const shared = rail(pb).getByRole('group', { name: 'Shared with me' });
     await shared.getByRole('button', { name: new RegExp(`Team ${a.username}`) }).click();
     await pb.waitForURL(new RegExp(`/${teamWs}/`));

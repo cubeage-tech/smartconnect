@@ -38,10 +38,29 @@ export interface OneTimeCredentials {
   expiresAt: string;
 }
 
+/**
+ * What happened to the activation e-mail of a newly provisioned account (the
+ * one-time credentials come back to the creator either way, to share if the
+ * e-mail did not go out). Absent from servers that sent no e-mail at all.
+ */
+export interface AccountInvitationDelivery {
+  emailSent: boolean;
+  emailUnavailable?: boolean;
+}
+
 export interface ProvisionResult {
   teamLead: TeamLead;
   credentials: OneTimeCredentials;
+  delivery?: AccountInvitationDelivery;
 }
+
+/** One sentence on the activation e-mail, for the one-time credentials dialog. */
+export const activationEmailNote = (delivery: AccountInvitationDelivery | undefined, loginId: string) => {
+  if (!delivery) return 'No e-mail is sent.';
+  if (delivery.emailSent) return `An activation e-mail with these details was sent to ${loginId}.`;
+  if (delivery.emailUnavailable) return "No e-mail was sent — e-mail delivery isn't configured on this server.";
+  return 'The activation e-mail could not be sent.';
+};
 
 export interface NewTeamLead {
   email: string;
@@ -79,6 +98,7 @@ export interface MemberInvitation extends TeamLeadInvitation {
 export interface MemberProvisionResult {
   invitation: MemberInvitation;
   credentials: OneTimeCredentials;
+  delivery?: AccountInvitationDelivery;
 }
 /** 409 bodies from addTeamMember (read from ApiError.data). */
 export interface MemberProvisionConflict {

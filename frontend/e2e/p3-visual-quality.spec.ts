@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { apiAs, createWorkspace, logIn, newUser, sendMessage, signUp, tokenOf, trackPageErrors } from './helpers';
+import { acceptInvitationTo, apiAs, createWorkspace, logIn, newUser, sendMessage, signUp, tokenOf, trackPageErrors } from './helpers';
 
 /**
  * P3 — visual quality and responsive layout across the main screens, in both
@@ -66,7 +66,8 @@ test('P3: main screens render cleanly in light and dark, phone to desktop', asyn
   const request = page.request;
   const candidates = await (await apiAs(request, ownerToken).get(`/api/workspaces/${ws}/member-candidates?q=${peer.username}`)).json();
   const peerId = candidates.users.find((u: { username: string }) => u.username === peer.username).id;
-  expect((await apiAs(request, ownerToken).post(`/api/workspaces/${ws}/members`, { userId: peerId })).ok()).toBeTruthy();
+  expect((await apiAs(request, ownerToken).post(`/api/workspaces/${ws}/members`, { userId: peerId })).ok()).toBeTruthy(); // an invitation…
+  await acceptInvitationTo(request, peerToken, ws); // …they accept
 
   await sendMessage(page, 'Welcome to the **design review** channel');
   await sendMessage(page, 'Agenda for today:');

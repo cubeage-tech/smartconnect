@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { corsOrigins, DEV_APP_URL, normalizeAppUrl, trustProxySetting } from './deployment';
+import { missingEmailSettings } from '../lib/emailDelivery';
 
 dotenv.config();
 
@@ -37,4 +38,14 @@ export const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
 if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
   console.error('FATAL: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be set. Exiting.');
   process.exit(1);
+}
+
+// E-mail (Brevo, utils/mailer.ts) is not required to run: without it every
+// screen says no e-mail was sent and shows the one-time details to share.
+// Production names what is missing at startup — names only, never values.
+if (NODE_ENV === 'production') {
+  const missing = missingEmailSettings();
+  if (missing.length > 0) {
+    console.warn(`E-mail delivery is OFF: ${missing.join(' and ')} not set or invalid (Brevo). Activation and invitation e-mails will not be sent.`);
+  }
 }

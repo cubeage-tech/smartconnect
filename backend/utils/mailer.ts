@@ -1,48 +1,105 @@
-import { Resend } from 'resend';
-import { emailDeliveryConfigured } from '../lib/emailDelivery';
+import { emailSettings, type EmailSettings } from '../lib/emailDelivery';
 
-// Switched from Gmail SMTP (nodemailer) to Resend's HTTP API — Render's free
-// tier silently blocks/times-out outbound SMTP (ports 587 and 465 both hung
-// for minutes instead of failing), which is a known anti-spam measure on
-// several free PaaS tiers. Resend runs entirely over HTTPS (443), which
-// isn't subject to that restriction.
+// E-mail goes through Brevo's transactional HTTP API, over HTTPS — never SMTP:
+// Render's free tier silently blocks/times-out outbound SMTP (ports 587 and
+// 465 both hung for minutes instead of failing), a known anti-spam measure on
+// several free PaaS tiers; HTTPS (443) is not subject to it.
 //
-// Sender identity. Set EMAIL_FROM to an address on a domain you have verified
-// in Resend (e.g. "SmartConnect <no-reply@your-verified-domain>"). Without it,
-// mail goes from Resend's shared test sender `onboarding@resend.dev`, which
-// Resend only delivers to the Resend account owner's own address — fine for
-// testing, not for real users. No sender domain is assumed here.
+// Settings (lib/emailDelivery.ts): BREVO_API_KEY, BREVO_FROM_EMAIL — a sender
+// verified in Brevo (or on a domain verified there) — and optionally
+// BREVO_FROM_NAME. Only Brevo's message id or error status is ever logged:
+// never the key, a password, a token or a link.
 export const EMAIL_BRAND = 'SmartConnect';
-const DEFAULT_FROM = `${EMAIL_BRAND} <onboarding@resend.dev>`;
-export const emailFrom = () => process.env.EMAIL_FROM?.trim() || DEFAULT_FROM;
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+/** A send Brevo has not answered by then is aborted and reported as failed. */
+export const BREVO_TIMEOUT_MS = 10_000;
+const MAX_REASON_LENGTH = 200;
 
-const getClient = (): Resend | null => {
-  if (!emailDeliveryConfigured()) return null;
-  return new Resend((process.env.RESEND_API_KEY as string).trim());
+interface OutgoingEmail {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}
+type SendResult = { data: { id?: string }; error: null } | { data: null; error: { message: string } };
+
+/** Brevo's error answer in one line — HTTP status, Brevo's code and reason — never repeating the key. */
+const describeBrevoError = (status: number, body: unknown, apiKey: string) => {
+  const { code, message } = (body && typeof body === 'object' ? body : {}) as { code?: unknown; message?: unknown };
+  const reason = typeof message === 'string' ? message.split(apiKey).join('[redacted]').slice(0, MAX_REASON_LENGTH) : '';
+  return `Brevo API error (HTTP ${status}${typeof code === 'string' ? ` ${code}` : ''})${reason ? `: ${reason}` : ''}`;
 };
 
-// 1. Send Invite Email Function
+/**
+ * Sends one e-mail through Brevo (POST /v3/smtp/email). It answers
+ * { data } or { error } — API errors, timeouts and network failures alike,
+ * never thrown raw — so each sender below keeps its own failure handling.
+ */
+const sendViaBrevo = async ({ apiKey, sender }: EmailSettings, email: OutgoingEmail): Promise<SendResult> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), BREVO_TIMEOUT_MS);
+  try {
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json', 'api-key': apiKey },
+      body: JSON.stringify({
+        sender,
+        to: [{ email: email.to }],
+        subject: email.subject,
+        htmlContent: email.html,
+        ...(email.text ? { textContent: email.text } : {}),
+      }),
+      signal: controller.signal,
+    });
+    const body: unknown = await response.json().catch(() => null);
+    if (!response.ok) return { data: null, error: { message: describeBrevoError(response.status, body, apiKey) } };
+    const messageId = (body as { messageId?: unknown } | null)?.messageId;
+    return { data: { id: typeof messageId === 'string' ? messageId : undefined }, error: null };
+  } catch (err) {
+    if (controller.signal.aborted) {
+      return { data: null, error: { message: `Brevo did not respond within ${BREVO_TIMEOUT_MS / 1000} s` } };
+    }
+    const code = (err as { cause?: { code?: unknown } } | null)?.cause?.code;
+    return { data: null, error: { message: `Could not reach Brevo${typeof code === 'string' ? ` (${code})` : ''}` } };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * Workspace names, display names and addresses are chosen by users: every
+ * value put into an e-mail's HTML is escaped, so nobody can inject markup or
+ * links into a SmartConnect-branded message.
+ */
+const escapeHtml = (value: string) =>
+  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// 1. Send Invite Email Function — a workspace invitation (new or existing
+// account): which workspace, which address it is for, and its link. Never a
+// password: existing accounts sign in with their own and accept.
 export const sendInviteEmail = async (to: string, inviteLink: string, workspaceName: string) => {
-  const resend = getClient();
-  if (!resend) {
-    console.warn('RESEND_API_KEY not configured - invitations will not be sent');
+  const settings = emailSettings();
+  if (!settings) {
+    console.warn('E-mail delivery (Brevo) is not configured - invitations will not be sent');
     return { success: false, message: 'Email service not configured' };
   }
 
-  const { data, error } = await resend.emails.send({
-    from: emailFrom(),
+  const workspace = escapeHtml(workspaceName);
+  const link = escapeHtml(inviteLink);
+  const { data, error } = await sendViaBrevo(settings, {
     to,
     subject: `You've been invited to join ${workspaceName} on ${EMAIL_BRAND}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px;">
-        <h1>Join your team on ${workspaceName}</h1>
-        <p>You have been invited to collaborate on <strong>${workspaceName}</strong>!</p>
+        <h1>Join your team on ${workspace}</h1>
+        <p>You have been invited to collaborate on <strong>${workspace}</strong>!</p>
+        <p style="color: #555; font-size: 14px;">This invitation is for <strong>${escapeHtml(to)}</strong>. Open it, then create your account with this address or sign in with your existing ${EMAIL_BRAND} account to accept it.</p>
         <p>
-          <a href="${inviteLink}" style="display: inline-block; padding: 12px 24px; background-color: #4a154b; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
+          <a href="${link}" style="display: inline-block; padding: 12px 24px; background-color: #4a154b; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
             Accept Invite
           </a>
         </p>
-        <p style="color: #999; font-size: 12px;">Or copy this link: ${inviteLink}</p>
+        <p style="color: #999; font-size: 12px;">Or copy this link: ${link}</p>
       </div>
     `,
   });
@@ -56,18 +113,88 @@ export const sendInviteEmail = async (to: string, inviteLink: string, workspaceN
   return { success: true, messageId: data?.id };
 };
 
+export interface AccountInvitationEmail {
+  to: string;
+  /** TEAM_LEAD: added by the Company Admin. MEMBER: added to `workspaceName` by its Team Lead. */
+  role: 'TEAM_LEAD' | 'MEMBER';
+  loginId: string;
+  temporaryPassword: string;
+  activationUrl: string;
+  expiresAt: Date;
+  workspaceName: string | null;
+}
+
+// 1b. Newly provisioned accounts only (Team Leads, new Members): the login,
+// the temporary password and the single-use activation link. Existing
+// accounts never get this e-mail (they get sendInviteEmail). Nothing about
+// the message is logged except the provider's message id.
+export const sendAccountInvitationEmail = async (details: AccountInvitationEmail) => {
+  const settings = emailSettings();
+  if (!settings) throw new Error('Email service is not configured.');
+
+  const { to, role, loginId, temporaryPassword, activationUrl, expiresAt, workspaceName } = details;
+  const expires = expiresAt.toUTCString();
+  const subject =
+    role === 'TEAM_LEAD' ? `Activate your ${EMAIL_BRAND} Team Lead account` : `You've been invited to ${workspaceName ?? 'a workspace'} on ${EMAIL_BRAND}`;
+  const headline =
+    role === 'TEAM_LEAD'
+      ? `You've been added to ${EMAIL_BRAND} as a Team Lead.`
+      : `You've been added to <strong>${escapeHtml(workspaceName ?? '')}</strong> on ${EMAIL_BRAND} as a member.`;
+  const link = escapeHtml(activationUrl);
+  const { data, error } = await sendViaBrevo(settings, {
+    to,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2 style="color: #111827;">Activate your ${EMAIL_BRAND} account</h2>
+        <p>${headline}</p>
+        <table style="border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+          ${workspaceName ? `<tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">Workspace</td><td style="padding: 4px 0;"><strong>${escapeHtml(workspaceName)}</strong></td></tr>` : ''}
+          <tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">Login (e-mail / user ID)</td><td style="padding: 4px 0;"><strong>${escapeHtml(loginId)}</strong></td></tr>
+          <tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">Temporary password</td><td style="padding: 4px 0; font-family: monospace; font-size: 15px;"><strong>${escapeHtml(temporaryPassword)}</strong></td></tr>
+        </table>
+        <p>
+          <a href="${link}" style="display: inline-block; padding: 12px 24px; background-color: #4a154b; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
+            Activate account
+          </a>
+        </p>
+        <p style="font-size: 14px; color: #374151;">Open the link, enter the temporary password and choose your own password. Then sign in with your login and your new password.</p>
+        <p style="color: #999; font-size: 12px;">The link and the temporary password work once and expire on ${escapeHtml(expires)}. Or copy this link: ${link}</p>
+        <p style="color: #999; font-size: 12px;">If you weren't expecting this, you can ignore this e-mail.</p>
+      </div>
+    `,
+    text: [
+      role === 'TEAM_LEAD' ? `You've been added to ${EMAIL_BRAND} as a Team Lead.` : `You've been added to ${workspaceName ?? 'a workspace'} on ${EMAIL_BRAND} as a member.`,
+      '',
+      ...(workspaceName ? [`Workspace: ${workspaceName}`] : []),
+      `Login (e-mail / user ID): ${loginId}`,
+      `Temporary password: ${temporaryPassword}`,
+      `Activation link: ${activationUrl}`,
+      '',
+      'Open the link, enter the temporary password and choose your own password. Then sign in with your login and your new password.',
+      `The link and the temporary password work once and expire on ${expires}.`,
+    ].join('\n'),
+  });
+
+  if (error) {
+    console.error('Account invitation email error:', error.message);
+    throw new Error(`Failed to send the account invitation email: ${error.message}`);
+  }
+
+  console.log('Account invitation email sent:', data?.id);
+};
+
 // 2. Send Sign-Up OTP Email Function
 export const sendOtpEmail = async (to: string, code: string) => {
-  const resend = getClient();
-  if (!resend) {
+  const settings = emailSettings();
+  if (!settings) {
     // Unlike invites/reset links, there's no fallback way to hand someone a
     // verification code if the email never sends — fail the signup request
     // loudly rather than leave them stuck on a code that never arrives.
     throw new Error('Email service is not configured — cannot send verification codes.');
   }
 
-  const { data, error } = await resend.emails.send({
-    from: emailFrom(),
+  const { data, error } = await sendViaBrevo(settings, {
     to,
     subject: `${code} is your ${EMAIL_BRAND} verification code`,
     html: `
@@ -94,14 +221,13 @@ export const sendOtpEmail = async (to: string, code: string) => {
 // 3. Send Reset Password Email Function — used by both self-service
 // "forgot password" and the admin "force reset" action.
 export const sendResetPasswordEmail = async (to: string, resetLink: string) => {
-  const resend = getClient();
-  if (!resend) {
-    console.warn('RESEND_API_KEY not configured - reset email will not be sent');
+  const settings = emailSettings();
+  if (!settings) {
+    console.warn('E-mail delivery (Brevo) is not configured - reset email will not be sent');
     return;
   }
 
-  const { data, error } = await resend.emails.send({
-    from: emailFrom(),
+  const { data, error } = await sendViaBrevo(settings, {
     to,
     subject: `Password Reset Request - ${EMAIL_BRAND}`,
     html: `

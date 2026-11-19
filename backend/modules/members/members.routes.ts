@@ -3,11 +3,10 @@ import { ChannelScopedRequest, requireChannelMembership } from '../../middleware
 import { requireSessionUser } from '../../middleware/identity.middleware';
 import { userRateLimit } from '../../middleware/userRateLimit.middleware';
 import { requireWorkspaceAccess, WorkspaceScopedRequest } from '../../middleware/workspace.middleware';
-import { notifyUser, subscribeUserToChannel } from '../../sockets/registry';
-import { addWorkspacePresence } from '../../sockets/presence.handlers';
+import { notifyUser } from '../../sockets/registry';
 import * as members from './members.service';
 import { finishWorkspaceDetach } from './members.realtime';
-import { ensureOrganizationMembership, pruneOrganizationMembership } from '../organizations/organizations.service';
+import { pruneOrganizationMembership } from '../organizations/organizations.service';
 import { AuthenticatedRequest } from '../../middleware/auth.middleware';
 import { assertWorkspace, canSeeWorkspaceMemberEmails, DirectoryViewer, loadWorkspaceActor } from '../../lib/policy';
 import { revokeChannelAccess } from '../../sockets/revocation';
@@ -73,9 +72,10 @@ router.get(
   }
 );
 
-// P2 — POST /api/workspaces/:workspaceId/members { userId }: a manager adds an
-// existing account directly. Its open sockets gain the workspace and General
-// at once, and its workspace list refreshes live.
+// P2 — POST /api/workspaces/:workspaceId/members { userId }: Settings →
+// Members → Add people. A manager invites an existing account (201 new, 200
+// already pending); it is told live ('invitations:changed') and joins only
+// when it accepts (invitations.controller adds the rooms then).
 router.post(
   '/workspaces/:workspaceId/members',
   ...requireSessionUser,
@@ -84,11 +84,7 @@ router.post(
     try {
       const { workspaceId } = req.params;
       const result = await members.addWorkspaceMember(req.user!.id, workspaceId, req.body?.userId);
-      await ensureOrganizationMembership(workspaceId, result.userId);
-      subscribeUserToChannel(result.userId, result.generalChannelId);
-      addWorkspacePresence(result.userId, workspaceId);
-      notifyUser(result.userId, 'workspace:member_updated', { workspaceId, userId: result.userId, role: 'MEMBER' });
-      res.status(201).json(result.member);
+      res.status(result.status).json(result.body);
     } catch (err) {
       next(err);
     }

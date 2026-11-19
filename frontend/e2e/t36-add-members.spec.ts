@@ -3,13 +3,14 @@ import { apiAs, createWorkspace, logIn, newUser, signUp, tokenOf, trackPageError
 
 /**
  * T.36 — a Team Lead adds members to their workspace with no e-mail provider
- * (E2E runs with RESEND_API_KEY empty, like the local dev setup), from the
+ * (E2E runs with BREVO_API_KEY empty, like the local dev setup), from the
  * People page:
- *  - a new person: "Add member" → name/e-mail (role shown as Member) → a clear
+ *  - a new person: "Add members" → name/e-mail (role shown as Member) → a clear
  *    one-time result with the activation link and temporary password;
  *  - the new member activates (temporary password → own password), signs in,
  *    sees that workspace and not the lead's other one;
- *  - an existing account is added directly — once; a second add is refused;
+ *  - an existing account gets a workspace invitation it accepts — once; a
+ *    second add says it is already a member;
  *  - e-mail invitations say plainly that no e-mail can be sent.
  */
 const freshPage = async (browser: Browser) => (await browser.newContext()).newPage();
@@ -44,17 +45,18 @@ test('Team Lead adds members from the People page without e-mail; the member sig
   const run = Date.now().toString(36);
   const memberEmail = `t36_member_${run}@example.test`;
 
-  await test.step('1. People → Add member: a new account, role Member, a clear one-time result', async () => {
+  await test.step('1. People → Add members: a new account, role Member, a clear one-time result', async () => {
     await openPeople(lead);
-    await lead.getByRole('button', { name: 'Add member' }).click();
-    const form = lead.getByRole('dialog', { name: 'Add team member' });
-    await expect(form).toContainText('No e-mail is sent');
+    await lead.getByRole('button', { name: 'Add members' }).click();
+    const form = lead.getByRole('dialog', { name: 'Add members' });
+    await expect(form).toContainText('e-mailed to them when this server can send e-mail');
     await expect(form.getByLabel('Role')).toHaveValue('Member');
-    await form.getByLabel('E-mail address').fill(memberEmail);
+    await form.getByLabel('E-mail addresses').fill(memberEmail);
     await form.getByLabel('Display name (optional)').fill(`Mia ${run}`);
-    await form.getByRole('button', { name: 'Create member' }).click();
+    await form.getByRole('button', { name: 'Add members' }).click();
     const result = lead.getByRole('dialog', { name: 'Member invitation' });
-    await expect(result).toContainText(`Account created for Mia ${run}. They join ${workspaceName} when they activate it — no e-mail is sent.`);
+    // E2E runs without an e-mail provider: said plainly, and the details are shown to share.
+    await expect(result).toContainText(`Account created for Mia ${run}. They join ${workspaceName} when they activate it — no e-mail was sent (e-mail delivery isn't configured).`);
   });
   const credentials = await readCredentials(lead);
   expect(credentials.loginId).toBe(memberEmail);
@@ -87,37 +89,43 @@ test('Team Lead adds members from the People page without e-mail; the member sig
     expect(ids).toEqual([workspaceId]);
     expect([403, 404]).toContain((await api.get(`/api/workspaces/${otherWorkspaceId}/channels`)).status());
     await member.goto(`/${otherWorkspaceId}/directory?tab=People`);
-    await expect(member.getByRole('button', { name: 'Add member' })).toHaveCount(0);
+    await expect(member.getByRole('button', { name: 'Add members' })).toHaveCount(0);
     await expect(member.getByRole('list', { name: 'Workspace members' })).toHaveCount(0);
-    // In their own workspace a Member gets no "Add member" either.
+    // In their own workspace a Member gets no "Add members" either.
     await member.goto(`/${workspaceId}/directory?tab=People`);
     await expect(member.getByRole('list', { name: 'Workspace members' })).toBeVisible();
-    await expect(member.getByRole('button', { name: 'Add member' })).toHaveCount(0);
+    await expect(member.getByRole('button', { name: 'Add members' })).toHaveCount(0);
   });
 
-  await test.step('4. an existing account is added directly, once', async () => {
+  await test.step('4. an existing account gets an invitation it accepts, once', async () => {
     const existing = await freshPage(browser);
     const existingUser = newUser('t36existing');
     await signUp(existing, existingUser);
     await existing.waitForURL(new RegExp(`/${UUID}/`));
 
     await openPeople(lead);
-    await lead.getByRole('button', { name: 'Add member' }).click();
-    const form = lead.getByRole('dialog', { name: 'Add team member' });
-    await form.getByLabel('E-mail address').fill(existingUser.email);
-    await form.getByRole('button', { name: 'Create member' }).click();
-    await expect(form.getByRole('status')).toContainText('already has an account, so no new account is created');
-    await form.getByRole('button', { name: `Add ${existingUser.username} to ${workspaceName}` }).click();
+    await lead.getByRole('button', { name: 'Add members' }).click();
+    const form = lead.getByRole('dialog', { name: 'Add members' });
+    await form.getByLabel('E-mail addresses').fill(existingUser.email);
+    await form.getByRole('button', { name: 'Add members' }).click();
+    await expect(form.getByRole('list', { name: 'Results' })).toContainText('Already has an account — invitation created; they see it in SmartConnect and accept it there');
+    await form.getByRole('button', { name: 'Done' }).click();
     await expect(form).toHaveCount(0);
+    await expect(lead.getByRole('button', { name: `View profile of ${existingUser.username}` })).toHaveCount(0); // not until they accept
+
+    await existing.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Workspace invitations (1)' }).click();
+    await existing.getByRole('dialog', { name: 'Workspace invitations' }).getByRole('button', { name: `Accept invitation to ${workspaceName}` }).click();
+    await existing.waitForURL(new RegExp(`/${workspaceId}/c/`));
+    await lead.reload();
     await expect(lead.getByRole('button', { name: `View profile of ${existingUser.username}` })).toBeVisible();
 
-    // A second add of the same account is refused, and creates nothing.
-    await lead.getByRole('button', { name: 'Add member' }).click();
-    const again = lead.getByRole('dialog', { name: 'Add team member' });
-    await again.getByLabel('E-mail address').fill(existingUser.email);
-    await again.getByRole('button', { name: 'Create member' }).click();
-    await expect(again.getByRole('alert')).toContainText('already a member of this workspace');
-    await again.getByRole('button', { name: 'Cancel' }).click();
+    // A second add of the same account says it is already a member, and creates nothing.
+    await lead.getByRole('button', { name: 'Add members' }).click();
+    const again = lead.getByRole('dialog', { name: 'Add members' });
+    await again.getByLabel('E-mail addresses').fill(existingUser.email);
+    await again.getByRole('button', { name: 'Add members' }).click();
+    await expect(again.getByRole('list', { name: 'Results' })).toContainText(`Already a member of ${workspaceName}`);
+    await again.getByRole('button', { name: 'Done' }).click();
     const members = await (await apiAs(request, await tokenOf(lead)).get(`/api/workspaces/${workspaceId}/members?q=${encodeURIComponent(existingUser.username)}`)).json();
     expect(members.members.filter((m: { username: string }) => m.username === existingUser.username)).toHaveLength(1);
     await existing.context().close();

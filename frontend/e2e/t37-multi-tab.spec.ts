@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { API_URL, apiAs, createWorkspace, newUser, pageToken, signUp, trackPageErrors } from './helpers';
+import { acceptInvitationTo, API_URL, apiAs, createWorkspace, newUser, pageToken, signUp, trackPageErrors } from './helpers';
 
 /**
  * T.37 — several users side by side in ONE browser profile: three tabs of one
@@ -80,7 +80,10 @@ test('three users in three tabs of one browser profile: separate identities, req
     workspaceId = await createWorkspace(tabs.lead, `T37 Team ${run}`);
     tokens.lead = (await pageToken(tabs.lead))!; // unchanged session, re-read after the reload in createWorkspace
     const lead = apiAs(request, tokens.lead);
-    for (const key of ['dev1', 'dev2'] as const) expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: ids[key] })).status()).toBe(201);
+    for (const key of ['dev1', 'dev2'] as const) {
+      expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: ids[key] })).status()).toBe(201); // an invitation…
+      await acceptInvitationTo(request, tokens[key], workspaceId); // …they accept
+    }
     const project = await lead.post(`/api/workspaces/${workspaceId}/projects`, { name: `Payments ${run}`, visibility: 'PRIVATE', key: 'PAY' });
     expect(project.status(), await project.text()).toBe(201);
     projectId = (await project.json()).id ?? (await project.json()).project?.id;

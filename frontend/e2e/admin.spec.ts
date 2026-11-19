@@ -115,7 +115,8 @@ test('invitations, join requests, live role-based controls and membership manage
   await openWorkspaceMenuItem(a, workspaceName, 'Workspace settings');
   await a.getByRole('tab', { name: 'Invitations' }).click();
 
-  // Invite by e-mail. The token in the create response never reaches the page.
+  // Invite by e-mail. The token reaches the page only as the invitation's own
+  // link, shown once to the inviter to share — never in the list or the listing.
   const inviteeEmail = `invitee_${alice.username}@example.test`;
   await a.getByLabel('E-mail address').fill(inviteeEmail);
   const [created] = await Promise.all([
@@ -128,7 +129,8 @@ test('invitations, join requests, live role-based controls and membership manage
   const invitations = a.getByRole('list', { name: 'Invitations' });
   const row = invitations.getByRole('listitem').filter({ hasText: inviteeEmail });
   await expect(row).toContainText('Pending');
-  expect(await a.content()).not.toContain(createdBody.token);
+  await expect(a.getByLabel(`Invitation link for ${inviteeEmail}`)).toHaveValue(new RegExp(`/invite/${createdBody.token}$`));
+  expect(await invitations.innerHTML()).not.toContain(createdBody.token);
   // The manager listing itself carries no tokens.
   const listing = await (await apiAs(request, await tokenOf(a)).get(`/api/workspaces/${workspaceId}/invitations`)).json();
   expect(JSON.stringify(listing)).not.toContain(createdBody.token);

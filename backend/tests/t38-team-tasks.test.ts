@@ -28,8 +28,11 @@ const team = async () => {
   const { workspaceId } = await createWorkspace(lead, `SmartUnifolio ${Date.now()}-${Math.random()}`);
   const [sahil, dev2, dev3] = [await createAndLoginUser(), await createAndLoginUser(), await createAndLoginUser()];
   for (const m of [sahil, dev2, dev3]) {
-    const added = await as(lead).post(`/api/workspaces/${workspaceId}/members`, { userId: m.user.id });
-    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    // Added people get an invitation and join when they accept it.
+    const invited = await as(lead).post(`/api/workspaces/${workspaceId}/members`, { userId: m.user.id });
+    expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+    const accepted = await as(m).post(`/api/invitations/received/${invited.body.invitationId}/accept`);
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
   }
   return { lead, sahil, dev2, dev3, workspaceId, base: `/api/workspaces/${workspaceId}/team-tasks` };
 };

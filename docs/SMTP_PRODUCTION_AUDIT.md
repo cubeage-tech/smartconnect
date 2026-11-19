@@ -1,5 +1,7 @@
 # SMTP Production Audit: Brevo on Render
 
+> **Update (2026-11-19):** superseded by the Brevo integration. E-mail now goes through Brevo's transactional HTTP API (`POST https://api.brevo.com/v3/smtp/email`, HTTPS) using `BREVO_API_KEY`, `BREVO_FROM_EMAIL` and `BREVO_FROM_NAME`, which is option B below. Resend, `RESEND_API_KEY` and `EMAIL_FROM` are no longer used, and SMTP is still not used. See `README.md` and `render.yaml` for the current settings. The findings below describe commit `7734bbd`.
+
 - **Date:** 2026-11-17
 - **Commit audited:** `7734bbd` (branch `main`)
 - **Scope:** read-only. No code, database, environment or deployment changes. No emails were sent and no invitations were created. Secret values in `backend/.env` were not read; only key names and value lengths were checked. The Render dashboard was not accessed, so production env values are unverified.

@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { apiAs, createWorkspace, logIn, newUser, pageToken, signUp, trackPageErrors } from './helpers';
+import { acceptInvitationTo, apiAs, createWorkspace, logIn, newUser, pageToken, signUp, trackPageErrors } from './helpers';
 
 /**
  * T.38 — Team Lead → member task assignment, in ONE browser profile with four
@@ -48,7 +48,10 @@ test('Team Lead assigns 5/3/2 tasks; each member sees only theirs; progress upda
     }
     workspaceId = await createWorkspace(tabs.lead, `SmartUnifolio ${run}`);
     const lead = apiAs(request, await token('lead'));
-    for (const k of ['sahil', 'dev2', 'dev3'] as const) expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: ids[k] })).status()).toBe(201);
+    for (const k of ['sahil', 'dev2', 'dev3'] as const) {
+      expect((await lead.post(`/api/workspaces/${workspaceId}/members`, { userId: ids[k] })).status()).toBe(201); // an invitation…
+      await acceptInvitationTo(request, await token(k), workspaceId); // …they accept
+    }
   });
 
   await test.step('1–4. Team Lead opens Team Tasks and creates 5 + 3 + 2 tasks, one after another', async () => {

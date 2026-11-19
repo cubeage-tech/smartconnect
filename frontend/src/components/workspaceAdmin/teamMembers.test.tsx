@@ -42,47 +42,46 @@ beforeEach(() => {
 });
 afterEach(() => vi.resetAllMocks());
 
-describe('Add team member (Stage 3)', () => {
+describe('Add members (Stage 3)', () => {
   it('creates a new member and hands the one-time credentials to the caller', async () => {
     const onCreated = vi.fn();
-    api.post.mockResolvedValueOnce({ data: { invitation: invitation('i1', 'Mia', 'PENDING'), credentials: CREDENTIALS } });
-    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={onCreated} onAddedExisting={vi.fn()} />);
-    const dialog = screen.getByRole('dialog', { name: 'Add team member' });
-    fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: ' Mia@Acme.io ' } });
+    api.post.mockResolvedValueOnce({ data: { invitation: invitation('i1', 'Mia', 'PENDING'), credentials: CREDENTIALS, delivery: { emailSent: true } } });
+    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={onCreated} onChanged={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: 'Add members' });
+    fireEvent.change(within(dialog).getByLabelText(/E-mail addresses/), { target: { value: ' Mia@Acme.io ' } });
     fireEvent.change(within(dialog).getByLabelText(/Display name/), { target: { value: 'Mia Member' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create member' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add members' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/workspaces/w1/member-invitations', { email: 'Mia@Acme.io', displayName: 'Mia Member' }));
-    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ credentials: CREDENTIALS })));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ credentials: CREDENTIALS, delivery: { emailSent: true } })));
   });
 
-  it('never duplicates an existing account: offers a direct add or the reusable invite link instead', async () => {
-    const onAddedExisting = vi.fn();
-    api.post.mockRejectedValueOnce({
-      response: { status: 409, data: { error: 'This person already has an account. Invite them to the workspace instead.', existingAccount: true, user: { id: 'u9', username: 'omar', displayName: 'Omar' } } },
-    });
-    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onAddedExisting={onAddedExisting} />);
-    const dialog = screen.getByRole('dialog', { name: 'Add team member' });
-    fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: 'omar@acme.io' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create member' }));
-    expect(await within(dialog).findByText(/already has an account/)).toBeInTheDocument();
-
-    api.get.mockResolvedValueOnce({ data: { url: 'http://localhost:5174/join-workspace?token=reusable', expiresAt: '2026-11-17T00:00:00.000Z' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy invite link' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:5174/join-workspace?token=reusable'));
-
-    api.post.mockResolvedValueOnce({ data: {} });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Omar to Design' }));
-    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/api/workspaces/w1/members', { userId: 'u9' }));
-    await waitFor(() => expect(onAddedExisting).toHaveBeenCalled());
+  // Flow 4: an existing account is never duplicated or added behind its back —
+  // it gets a workspace invitation it accepts (or declines) itself.
+  it('never duplicates an existing account: sends it a workspace invitation to accept — never a direct add', async () => {
+    const onChanged = vi.fn();
+    api.post
+      .mockRejectedValueOnce({
+        response: { status: 409, data: { error: 'This person already has an account. Invite them to the workspace instead.', existingAccount: true, user: { id: 'u9', username: 'omar', displayName: 'Omar' } } },
+      })
+      .mockResolvedValueOnce({ data: { success: true, id: 'wi1', emailSent: true, existingAccount: true, inviteLink: 'http://localhost:5174/invite/3f1c2a9e-8b7d-4c6e-9a1f-2b3c4d5e6f70' } });
+    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onChanged={onChanged} />);
+    const dialog = screen.getByRole('dialog', { name: 'Add members' });
+    fireEvent.change(within(dialog).getByLabelText(/E-mail addresses/), { target: { value: 'omar@acme.io' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add members' }));
+    expect(await within(dialog).findByText(/Already has an account — invitation sent/)).toBeInTheDocument();
+    expect(api.post).toHaveBeenLastCalledWith('/api/workspaces/w1/invites', { email: 'omar@acme.io' });
+    expect(api.post).not.toHaveBeenCalledWith('/api/workspaces/w1/members', expect.anything());
+    expect(onChanged).toHaveBeenCalled();
   });
 
   it('explains a pending activation without creating anything', async () => {
     api.post.mockRejectedValueOnce({ response: { status: 409, data: { error: 'This person already has an account invitation awaiting activation.', pendingActivation: true } } });
-    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onAddedExisting={vi.fn()} />);
-    const dialog = screen.getByRole('dialog', { name: 'Add team member' });
-    fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: 'mia@acme.io' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create member' }));
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('awaiting activation');
+    render(<AddTeamMemberModal workspaceId="w1" workspaceName="Design" onClose={vi.fn()} onCreated={vi.fn()} onChanged={vi.fn()} />);
+    const dialog = screen.getByRole('dialog', { name: 'Add members' });
+    fireEvent.change(within(dialog).getByLabelText(/E-mail addresses/), { target: { value: 'mia@acme.io' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add members' }));
+    expect(await within(dialog).findByText(/awaiting activation/)).toBeInTheDocument();
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 });
 

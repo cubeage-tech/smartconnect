@@ -4,6 +4,22 @@ import request from 'supertest';
 import { afterAll, describe, expect, it } from 'vitest';
 import { app } from '../app';
 
+// No test ever sends real e-mail: tests/setup.ts clears the e-mail settings
+// (whatever backend/.env holds), and refuses any request to the real Brevo
+// API. A test that needs "configured" sets a fake key and replaces the
+// transport (the mailer, or fetch) itself.
+describe('test environment: no real e-mail', () => {
+  it('starts every test file with the Brevo settings empty', () => {
+    expect(process.env.BREVO_API_KEY).toBe('');
+    expect(process.env.BREVO_FROM_EMAIL).toBe('');
+    expect(process.env.BREVO_FROM_NAME).toBe('');
+  });
+
+  it('refuses any request to the real Brevo API, even from a test that sets a key', async () => {
+    await expect(fetch('https://api.brevo.com/v3/account')).rejects.toThrow(/real Brevo API/);
+  });
+});
+
 /**
  * Regression test for the test harness itself (found during Sub-batch C).
  *
