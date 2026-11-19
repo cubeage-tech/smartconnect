@@ -1,4 +1,4 @@
-# SmartConnect Collab
+# SmartConnect Collab 
 
 Team messaging and collaboration: workspaces and organizations, public and
 private channels, direct and group messages, threads, reactions, pins, polls,
