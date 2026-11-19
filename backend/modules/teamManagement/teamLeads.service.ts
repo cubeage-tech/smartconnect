@@ -5,10 +5,12 @@ import { logAuditEvent } from '../../lib/auditLog';
 import { emailDeliveryConfigured } from '../../lib/emailDelivery';
 import { isValidEmail } from '../../lib/email';
 import { HttpError } from '../../lib/httpError';
-import { findUserIdByEmail, findUserIdByUsername } from '../../lib/identity';
+import { findUserIdByEmail } from '../../lib/identity';
 import { isUuid } from '../../lib/messageInput';
 import { prisma } from '../../lib/prisma';
-import { SYSTEM_USER_EMAIL } from '../../lib/sharedWorkspace';
+import { revokeAllSessions } from '../../lib/sessions';
+import { ensureSharedWorkspaceMembership, SYSTEM_USER_EMAIL } from '../../lib/sharedWorkspace';
+import { uniqueUsername } from '../../lib/username';
 import { sendAccountInvitationEmail } from '../../utils/mailer';
 import {
   BCRYPT_COST,
@@ -107,24 +109,8 @@ export const parseOptionalText = (value: unknown, label: string) => {
   return text;
 };
 
-/** A readable, unique username (3–40 characters: letters, digits, ".", "_", "-"). */
-export const uniqueUsername = async (displayName: string | null, email: string) => {
-  const source = (displayName ?? email.split('@')[0]).normalize('NFKD').replace(/[̀-ͯ]/g, '');
-  let base = source
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '.')
-    .replace(/[._-]{2,}/g, '.')
-    .replace(/^[._-]+|[._-]+$/g, '')
-    .slice(0, 30)
-    .replace(/[._-]+$/g, '');
-  if (base.length < 3) base = 'teamlead';
-  for (let n = 1; n <= 20; n++) {
-    const candidate = n === 1 ? base : `${base}${n}`;
-    // Stage 6C (IDN-3): exact and case-insensitive; "_" is not a wildcard.
-    if (!(await findUserIdByUsername(prisma, candidate))) return candidate;
-  }
-  return `${base}.${generateActivationToken().replace(/[^a-z0-9]/gi, '').slice(0, 6).toLowerCase()}`;
-};
+/** A readable, unique username (moved to lib/username.ts; shared with public sign-up). */
+export { uniqueUsername };
 
 export const uniqueViolationOn = (err: unknown, field: string) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002' && JSON.stringify(err.meta?.target ?? '').includes(field);
@@ -181,8 +167,37 @@ export const emailAccountInvitation = async (
   }
 };
 
+/**
+ * Why an existing account cannot simply be made a Team Lead, or null when it
+ * can (promoteToTeamLead). Only an ACTIVE, ordinary account qualifies.
+ */
+const promotionBlocker = (account: { role: string; status: string; email: string; accountTier: { tier: AccountTier } | null }) => {
+  if (RESERVED_EMAILS.includes(account.email.toLowerCase())) return 'This account cannot be changed.';
+  if (account.role === 'ADMIN') return 'Company Admins already have every Team Lead capability.';
+  if (account.accountTier?.tier === 'TEAM_LEAD') return 'This account is already a Team Lead.';
+  if (account.status !== 'ACTIVE') return 'Only active accounts can be made Team Leads.';
+  return null;
+};
+
+const PROMOTION_SELECT = {
+  id: true,
+  username: true,
+  email: true,
+  role: true,
+  status: true,
+  accountTier: { select: { tier: true } },
+  profile: { select: { displayName: true } },
+} as const;
+
+export type ProvisionTeamLeadResult =
+  | {
+      kind: 'created';
+      body: { teamLead: ReturnType<typeof toTeamLead>; credentials: ReturnType<typeof credentialsResponse>; delivery: AccountInvitationDelivery };
+    }
+  | { kind: 'conflict'; body: Record<string, unknown> };
+
 /** POST /api/team-management/team-leads { email, displayName?, teamLabel? } */
-export const provisionTeamLead = async (adminId: string, body: Record<string, unknown> | undefined) => {
+export const provisionTeamLead = async (adminId: string, body: Record<string, unknown> | undefined): Promise<ProvisionTeamLeadResult> => {
   // Only these three fields are read; anything else in the body (role, tier,
   // status, password, …) is ignored.
   const email = parseEmail(body?.email);
@@ -191,7 +206,24 @@ export const provisionTeamLead = async (adminId: string, body: Record<string, un
 
   if (RESERVED_EMAILS.includes(email)) throw new HttpError(409, DUPLICATE);
   // Stage 6C (IDN-3): exact and case-insensitive; "_", "%" and "\" are ordinary characters.
-  if (await findUserIdByEmail(prisma, email)) throw new HttpError(409, DUPLICATE);
+  const existingId = await findUserIdByEmail(prisma, email);
+  if (existingId) {
+    // Never a second account, and never a new password for this one. Tell the
+    // admin whether the existing account (e.g. a self-registered Member) can
+    // be made a Team Lead instead — a separate, explicit action.
+    const existing = await prisma.user.findUniqueOrThrow({ where: { id: existingId }, select: PROMOTION_SELECT });
+    const blocker = promotionBlocker(existing);
+    return {
+      kind: 'conflict',
+      body: {
+        error: DUPLICATE,
+        existingAccount: true,
+        promotable: blocker === null,
+        ...(blocker ? { reason: blocker } : {}),
+        user: { id: existing.id, username: existing.username, displayName: existing.profile?.displayName ?? null, status: existing.status },
+      },
+    };
+  }
 
   const { userId, username, issued } = await createInvitedAccount(adminId, { email, displayName, teamLabel, tier: 'TEAM_LEAD', workspaceId: null });
   await logAuditEvent(
@@ -202,7 +234,100 @@ export const provisionTeamLead = async (adminId: string, body: Record<string, un
     `Provisioned Team Lead "${username}" (login ${email})${teamLabel ? ` for "${teamLabel}"` : ''}; invitation expires ${issued.expiresAt.toISOString()}`
   );
   const delivery = await emailAccountInvitation('TEAM_LEAD', email, issued, null);
-  return { teamLead: await loadTeamLead(userId), credentials: credentialsResponse(email, issued), delivery };
+  return { kind: 'created', body: { teamLead: await loadTeamLead(userId), credentials: credentialsResponse(email, issued), delivery } };
+};
+
+/**
+ * POST /api/team-management/team-leads/promote { userId } — a Company Admin
+ * makes an existing, ACTIVE ordinary account (typically a self-registered
+ * Member) a Team Lead. The account keeps its password, sessions, workspace
+ * memberships and platform role; only the TEAM_LEAD tier is granted. No other
+ * route grants a tier — signup, invitations and Team Leads never can.
+ */
+export const promoteToTeamLead = async (adminId: string, body: Record<string, unknown> | undefined) => {
+  const userId = body?.userId;
+  if (!isUuid(userId)) throw new HttpError(404, 'Account not found.');
+  const account = await prisma.user.findUnique({ where: { id: userId }, select: PROMOTION_SELECT });
+  if (!account || RESERVED_EMAILS.includes(account.email.toLowerCase())) throw new HttpError(404, 'Account not found.');
+  const blocker = promotionBlocker(account);
+  if (blocker) throw new HttpError(409, blocker);
+
+  await prisma.$transaction(async (tx) => {
+    // Re-checked under a row lock, so a concurrent suspension or promotion
+    // cannot slip in between the check above and the grant.
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${account.id} FOR UPDATE`;
+    const current = await tx.user.findUniqueOrThrow({ where: { id: account.id }, select: PROMOTION_SELECT });
+    const stillBlocked = promotionBlocker(current);
+    if (stillBlocked) throw new HttpError(409, stillBlocked);
+    await tx.accountTierGrant.upsert({
+      where: { userId: account.id },
+      update: { tier: 'TEAM_LEAD', grantedById: adminId },
+      create: { userId: account.id, tier: 'TEAM_LEAD', grantedById: adminId },
+    });
+  });
+  await logAuditEvent(adminId, 'PROMOTE_TEAM_LEAD', 'USER', account.id, `Made existing account "${account.username}" a Team Lead`);
+  return { teamLead: await loadTeamLead(account.id) };
+};
+
+/** A Team Lead by id — 404 for anyone else (Members, admins, system accounts, unknown ids). */
+const loadTeamLeadAccount = async (userId: unknown) => {
+  if (!isUuid(userId)) throw new HttpError(404, 'Team Lead not found.');
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, email: true, status: true, accountTier: { select: { tier: true } }, accountInvitations: { select: { status: true } } },
+  });
+  if (!user || user.accountTier?.tier !== 'TEAM_LEAD' || RESERVED_EMAILS.includes(user.email.toLowerCase())) {
+    throw new HttpError(404, 'Team Lead not found.');
+  }
+  return user;
+};
+
+/**
+ * Has this Team Lead ever been able to sign in? Provisioned accounts stay
+ * SUSPENDED until they activate (T.21), so "SUSPENDED" alone does not tell a
+ * deactivated Team Lead from one still awaiting activation. A Team Lead with
+ * no invitation at all was promoted from an existing account (or backfilled).
+ */
+const hasActivated = (lead: { accountInvitations: { status: AccountInvitationStatus }[] }) =>
+  lead.accountInvitations.length === 0 || lead.accountInvitations.some((i) => i.status === 'ACCEPTED');
+
+/**
+ * POST /api/team-management/team-leads/:userId/deactivate — the Team Lead can
+ * no longer sign in (ACTIVE → SUSPENDED) and every session ends at once. Their
+ * tier, workspaces and memberships are kept, so reactivating restores
+ * everything; while deactivated, the hierarchy grants them nothing
+ * (lib/policy loadHierarchyActor reads status on every request).
+ */
+export const deactivateTeamLead = async (adminId: string, userId: unknown) => {
+  const lead = await loadTeamLeadAccount(userId);
+  if (lead.id === adminId) throw new HttpError(400, 'You cannot deactivate your own account.');
+  if (lead.status === 'BANNED') throw new HttpError(409, 'This account is banned. Manage it under User Management.');
+  const changed = await prisma.user.updateMany({ where: { id: lead.id, status: 'ACTIVE' }, data: { status: 'SUSPENDED' } });
+  if (changed.count === 0) {
+    throw new HttpError(409, hasActivated(lead) ? 'This Team Lead is already deactivated.' : 'This Team Lead has not activated their account yet. Revoke the invitation instead.');
+  }
+  const ended = await revokeAllSessions(lead.id); // also disconnects their live sockets
+  await logAuditEvent(adminId, 'DEACTIVATE_TEAM_LEAD', 'USER', lead.id, `Deactivated Team Lead "${lead.username}" (${ended} session(s) ended)`);
+  return { teamLead: await loadTeamLead(lead.id) };
+};
+
+/**
+ * POST /api/team-management/team-leads/:userId/reactivate — SUSPENDED → ACTIVE
+ * for a Team Lead who had activated before. A Team Lead still awaiting
+ * activation is refused: making that account ACTIVE would only break its
+ * activation (reissue the invitation instead).
+ */
+export const reactivateTeamLead = async (adminId: string, userId: unknown) => {
+  const lead = await loadTeamLeadAccount(userId);
+  if (!hasActivated(lead)) {
+    throw new HttpError(409, 'This Team Lead has not activated their account yet. Reissue the invitation instead.');
+  }
+  if (lead.status === 'BANNED') throw new HttpError(409, 'This account is banned. Manage it under User Management.');
+  const changed = await prisma.user.updateMany({ where: { id: lead.id, status: 'SUSPENDED' }, data: { status: 'ACTIVE' } });
+  if (changed.count === 0) throw new HttpError(409, 'This Team Lead is already active.');
+  await ensureSharedWorkspaceMembership(lead.id); // SmartConnect Collab, as for every active account
+  await logAuditEvent(adminId, 'REACTIVATE_TEAM_LEAD', 'USER', lead.id, `Reactivated Team Lead "${lead.username}"`);
+  return { teamLead: await loadTeamLead(lead.id) };
 };
 
 /**

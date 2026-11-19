@@ -21,9 +21,11 @@ import { sendOtpEmail } from '../utils/mailer';
  *  - IDN-3: every identity comparison is exact and case-insensitive; "_", "%"
  *    and "\" are ordinary characters (Prisma's `equals` + `mode:'insensitive'`
  *    compiled to an unescaped ILIKE, where they were wildcards / an escape).
- *  - R1: sign-up re-checks, inside its account-creation transaction, that a
- *    live invitation for the address still exists (FOR SHARE), so a revocation
- *    that commits first prevents the account, and one that comes later waits.
+ *  - R1: an invitation revoked before sign-up applies it is never applied.
+ *    (Sign-up is public now, so the account itself is still created — with
+ *    SmartConnect Collab only. It was invitation-only from T.21.) Acceptance
+ *    stays a single conditional update, so a revocation and a sign-up on the
+ *    same invitation always serialize: one wins, never both.
  * Plus regressions for login, admin "Create user", Team Lead / Member
  * provisioning, activation and the e-mail invitation flow. Disposable test
  * database only; races are made deterministic with test-database-only
@@ -31,7 +33,6 @@ import { sendOtpEmail } from '../utils/mailer';
  */
 const PASSWORD = 'Password123!';
 const NEW_PASSWORD = 'member-Permanent-pass-1';
-const INVITE_ONLY = 'Sign-up is by invitation only. Open the invitation link you received to create your account.';
 const HOLD_SECONDS = 3;
 
 const tag = () => randomUUID().replace(/-/g, '').slice(0, 12);
@@ -89,8 +90,6 @@ const waitFor = async (probe: () => Promise<boolean> | boolean, what: string, ms
 const countOf = async (query: Prisma.Sql) => Number((await prisma.$queryRaw<{ n: bigint }[]>(query))[0].n);
 const insertIsHeld = async () => (await countOf(Prisma.sql`SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'PgSleep'`)) > 0;
 const waitsOnAdvisoryLock = async () => (await countOf(Prisma.sql`SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)) > 0;
-const waitsOnRowLock = async () =>
-  (await countOf(Prisma.sql`SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event IN ('transactionid', 'tuple')`)) > 0;
 
 /** A test-database-only BEFORE INSERT trigger on "User" for one exact address: `body` is PL/pgSQL. */
 const withUserInsertTrigger = async <T>(address: string, body: string, run: () => Promise<T>) => {
@@ -216,17 +215,19 @@ describe('Stage 6C — IDN-3: "_", "%" and "\\" are ordinary characters in ident
 });
 
 describe('Stage 6C — R1: invitation revocation and sign-up', () => {
-  it('#5 sign-up after the revocation has committed is refused with the gate\'s answer', async () => {
+  it('#5 sign-up after the revocation has committed: the account gets Collab only, never the revoked workspace', async () => {
     const email = uniqueEmail();
     const invitation = await invite(email);
     expect((await revoke(invitation.id)).status).toBe(200);
     const res = await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token });
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe(INVITE_ONLY);
-    expect(await accountsFor(email)).toBe(0);
+    expect(res.status).toBe(201);
+    expect(res.body.invitation).toBeNull();
+    expect(await accountsFor(email)).toBe(1);
+    expect(await invitationStatus(invitation.id)).toBe('revoked');
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id, workspaceId } })).toBe(0);
   });
 
-  it('#5b verify-otp: a revocation committed while the code is being verified prevents the account', async () => {
+  it('#5b verify-otp: a revocation committed while the code is being verified keeps the account out of the workspace', async () => {
     const email = uniqueEmail();
     const invitation = await invite(email);
     const requested = await post('/api/auth/signup-request', { username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token });
@@ -242,31 +243,41 @@ describe('Stage 6C — R1: invitation revocation and sign-up', () => {
       await release();
     }
     const res = await verified;
-    expect(res.status).toBe(403);
-    expect(res.body.error).toBe(INVITE_ONLY);
-    expect(await accountsFor(email)).toBe(0);
+    expect(res.status).toBe(201);
+    expect(res.body.invitation).toBeNull();
+    expect(await accountsFor(email)).toBe(1);
+    expect(await invitationStatus(invitation.id)).toBe('revoked');
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id, workspaceId } })).toBe(0);
   }, 30_000);
 
-  it('#6 a revocation racing a sign-up that already holds the invitation waits for it: one account, which accepted it; the late revocation finds nothing pending', async () => {
+  it('#6 a revocation racing a sign-up that has not applied the invitation yet wins: one account, Collab only; the invitation stays revoked', async () => {
     const email = uniqueEmail();
     const typed = capitalised(email);
     const invitation = await invite(email);
     const { signedUp, revoked } = await withUserInsertTrigger(typed, `PERFORM pg_sleep(${HOLD_SECONDS});`, async () => {
       const signedUpP = (async () => await signup({ username: uniqueUsername(), email: typed, password: PASSWORD, inviteToken: invitation.token }))();
       await waitFor(insertIsHeld, 'the sign-up INSERT to be held');
-      const revokedP = (async () => await revoke(invitation.id))();
-      // The revocation's UPDATE must wait for the sign-up's FOR SHARE on the invitation row.
-      await waitFor(waitsOnRowLock, 'the revocation to wait on the invitation row');
-      return { signedUp: await signedUpP, revoked: await revokedP };
+      // Nothing holds the invitation before sign-up applies it, so the revocation commits at once.
+      const revokedNow = await revoke(invitation.id);
+      return { signedUp: await signedUpP, revoked: revokedNow };
     });
+    expect(revoked.status).toBe(200);
     expect(signedUp.status).toBe(201);
-    // Serialized: the sign-up held the invitation first and accepted it in its own
-    // transaction; the revocation, waiting behind it, then finds nothing pending.
-    expect(revoked.status).toBe(400);
+    expect(signedUp.body.invitation).toBeNull();
     expect(await accountsFor(email)).toBe(1);
+    expect(await invitationStatus(invitation.id)).toBe('revoked');
+    expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(0);
+  }, 30_000);
+
+  it('#6b a revocation after sign-up applied the invitation finds nothing pending: the account keeps the workspace', async () => {
+    const email = uniqueEmail();
+    const invitation = await invite(email);
+    const signedUp = await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token });
+    expect(signedUp.status).toBe(201);
+    expect((await revoke(invitation.id)).status).toBe(400);
     expect(await invitationStatus(invitation.id)).toBe('accepted');
     expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(1);
-  }, 30_000);
+  });
 
   it('#7 a failed sign-up leaves its invitation pending and usable — refused before, or failing inside, the transaction', async () => {
     const email = uniqueEmail();
@@ -335,8 +346,8 @@ describe('Stage 6C — regressions', () => {
     expect((await request(app).post(`/api/invitations/accept/${invitation.token}`).set(authHeader(signedUp.body.token))).status).toBe(200);
     expect(await invitationStatus(invitation.id)).toBe('accepted');
     expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(1);
-    // A used invitation no longer opens sign-up.
-    expect((await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token })).status).toBe(403);
+    // A used invitation opens no second account for its address.
+    expect((await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken: invitation.token })).status).toBe(400);
   });
 
   it('#10 login still matches the stored address exactly, including "_", "%" and "\\"', async () => {

@@ -51,6 +51,11 @@ export type AuditAction =
   | 'REVOKE_ACCOUNT_INVITATION'
   | 'REISSUE_ACCOUNT_INVITATION'
   | 'ACTIVATE_ACCOUNT'
+  // Team Lead lifecycle (Company Admin only): an existing account made a
+  // Team Lead, and a Team Lead deactivated or reactivated.
+  | 'PROMOTE_TEAM_LEAD'
+  | 'DEACTIVATE_TEAM_LEAD'
+  | 'REACTIVATE_TEAM_LEAD'
   // Stage 3 (T.22): Team Lead → Member provisioning.
   | 'PROVISION_MEMBER'
   // T.32: account security events. Details never contain a token or password.

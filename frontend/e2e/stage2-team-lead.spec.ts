@@ -154,7 +154,7 @@ test('Stage 2: Company Admin adds a Team Lead; single-use activation; the tempor
   expect(leadErrors).toEqual([]);
 });
 
-test('T.21: sign-up is invitation-only — refused without an invitation, works through an e-mail invitation link', async ({ browser, request }) => {
+test('public sign-up: anyone joins SmartConnect Collab as a Member; an e-mail invitation link also joins its workspace', async ({ browser, request }) => {
   test.setTimeout(120_000);
   // A Team Lead's workspace issues an e-mail invitation (the existing Invitations flow).
   const owner = newUser('s21owner');
@@ -165,23 +165,40 @@ test('T.21: sign-up is invitation-only — refused without an invitation, works 
   const ownerToken = await tokenOf(o);
   const SIGNUP_FORM = (page: Page) => page.locator('form').filter({ has: page.getByRole('button', { name: 'Create Account' }) });
 
-  await test.step('1. without an invitation, the form explains it and the server refuses it — in the UI and via the API', async () => {
+  await test.step('1. without an invitation, anyone signs up from the form and lands in SmartConnect Collab as a Member', async () => {
     const stranger = newUser('s21stranger');
     const page = await freshPage(browser);
-    await page.goto('/signup');
-    await expect(page.getByText(/Sign-up is by invitation only — open the invitation link/)).toBeVisible();
+    const errors = trackPageErrors(page);
+    await page.goto('/login');
+    await page.getByRole('button', { name: 'Sign up for free' }).click();
+    await expect(page.getByText('Join SmartConnect Collab, the shared workspace for everyone.')).toBeVisible();
     const form = SIGNUP_FORM(page);
-    await form.getByPlaceholder('Samarth Karale').fill(stranger.username);
+    await form.getByLabel('Full name').fill('Stranger Danger');
     await form.locator('input[type="email"]').fill(stranger.email);
-    await form.locator('input[type="password"]').fill(stranger.password);
-    const attempt = page.waitForResponse((r) => r.url().endsWith('/api/auth/signup') && r.request().method() === 'POST');
+    await form.getByLabel('Password', { exact: true }).fill(stranger.password);
+    await form.getByLabel('Confirm password').fill(`${stranger.password}x`);
     await form.getByRole('button', { name: 'Create Account' }).click();
-    expect((await attempt).status()).toBe(403);
-    await expect(page.getByText('Sign-up is by invitation only. Open the invitation link you received to create your account.').first()).toBeVisible();
-    await expect(page).toHaveURL(/\/signup$/);
-    const direct = await request.post(`${API_URL}/api/auth/signup`, { data: { username: stranger.username, email: stranger.email, password: stranger.password } });
-    expect(direct.status()).toBe(403);
-    expect((await request.post(`${API_URL}/api/auth/login`, { data: { email: stranger.email, password: stranger.password } })).status()).toBe(401);
+    await expect(form.getByText('Passwords do not match.')).toBeVisible(); // checked before any request
+    await form.getByLabel('Confirm password').fill(stranger.password);
+    const created = page.waitForResponse((r) => r.url().endsWith('/api/auth/signup') && r.request().method() === 'POST');
+    await form.getByRole('button', { name: 'Create Account' }).click();
+    const response = await created;
+    expect(response.status()).toBe(201);
+    const body = await response.json();
+    expect(body.user.role).toBe('USER');
+    await page.waitForURL(new RegExp(`/${body.user.lastActiveWorkspaceId}(/|$)`));
+    await expect(page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: /^SmartConnect Collab/ })).toBeVisible();
+    // The API never accepts a privilege from the sign-up body.
+    const direct = newUser('s21direct');
+    const viaApi = await request.post(`${API_URL}/api/auth/signup`, {
+      data: { fullName: 'Direct Caller', email: direct.email, password: direct.password, confirmPassword: direct.password, role: 'ADMIN', tier: 'TEAM_LEAD' },
+    });
+    expect(viaApi.status()).toBe(201);
+    const directBody = await viaApi.json();
+    expect(directBody.user.role).toBe('USER');
+    const hierarchy = await apiAs(request, directBody.token).get('/api/me/hierarchy');
+    expect(await hierarchy.json()).toMatchObject({ role: 'MEMBER', canCreateWorkspaces: false });
+    expect(errors).toEqual([]);
     await page.context().close();
   });
 
@@ -195,21 +212,28 @@ test('T.21: sign-up is invitation-only — refused without an invitation, works 
     const errors = trackPageErrors(page);
     await page.goto(`/invite/${inviteToken}`);
     await page.waitForURL(/\/signup\?/);
-    await expect(page.getByText('Create your account to get started.')).toBeVisible();
+    await expect(page.getByText('Create your account to join the workspace you were invited to.')).toBeVisible();
     const form = SIGNUP_FORM(page);
     await expect(form.locator('input[type="email"]')).toHaveValue(invitee.email);
     await form.getByPlaceholder('Samarth Karale').fill(invitee.username);
-    await form.locator('input[type="password"]').fill(invitee.password);
+    await form.getByLabel('Password', { exact: true }).fill(invitee.password);
+    await form.getByLabel('Confirm password').fill(invitee.password);
     await form.getByRole('button', { name: 'Create Account' }).click();
     await page.waitForURL(new RegExp(`/${workspaceId}/`));
     expect(errors).toEqual([]);
     await page.context().close();
   });
 
-  await test.step('3. the used invitation cannot open another account', async () => {
+  await test.step('3. the used invitation grants nothing more: no second account for its address, no workspace for anyone else', async () => {
+    const again = await request.post(`${API_URL}/api/auth/signup`, { data: { username: newUser('s21again').username, email: invitee.email, password: invitee.password, inviteToken } });
+    expect(again.status()).toBe(400);
     const other = newUser('s21other');
     const reuse = await request.post(`${API_URL}/api/auth/signup`, { data: { username: other.username, email: other.email, password: other.password, inviteToken } });
-    expect(reuse.status()).toBe(403);
+    expect(reuse.status()).toBe(201);
+    const reused = await reuse.json();
+    expect(reused.invitation).toBeNull();
+    const theirs = (await (await apiAs(request, reused.token).get('/api/workspaces')).json()) as { id: string }[];
+    expect(theirs.map((w) => w.id)).not.toContain(workspaceId);
   });
 
   expect(ownerErrors).toEqual([]);

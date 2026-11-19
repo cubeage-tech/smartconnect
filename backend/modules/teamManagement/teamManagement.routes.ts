@@ -5,7 +5,15 @@ import { AuthenticatedRequest } from '../../middleware/auth.middleware';
 import { requireSessionUser } from '../../middleware/identity.middleware';
 import { userRateLimit } from '../../middleware/userRateLimit.middleware';
 import { activateAccount } from './activation.service';
-import { listTeamLeads, provisionTeamLead, reissueInvitation, revokeInvitation } from './teamLeads.service';
+import {
+  deactivateTeamLead,
+  listTeamLeads,
+  promoteToTeamLead,
+  provisionTeamLead,
+  reactivateTeamLead,
+  reissueInvitation,
+  revokeInvitation,
+} from './teamLeads.service';
 import { listMemberInvitations, myHierarchy, provisionMember, reissueMemberInvitation, revokeMemberInvitation } from './teamMembers.service';
 
 /**
@@ -41,11 +49,25 @@ teamManagementRoutes.get('/team-leads', handle(async (_req, res) => {
 }));
 teamManagementRoutes.post('/team-leads', writeLimiter, handle(async (req, res) => {
   noStore(res);
-  res.status(201).json(await provisionTeamLead(req.user!.id, req.body));
+  const result = await provisionTeamLead(req.user!.id, req.body);
+  // 409 for an address that already has an account, saying whether that
+  // account can be made a Team Lead instead (POST /team-leads/promote).
+  res.status(result.kind === 'created' ? 201 : 409).json(result.body);
+}));
+// An existing, active account (e.g. a self-registered Member) becomes a Team Lead.
+teamManagementRoutes.post('/team-leads/promote', writeLimiter, handle(async (req, res) => {
+  res.json(await promoteToTeamLead(req.user!.id, req.body));
 }));
 teamManagementRoutes.post('/team-leads/:userId/reissue', writeLimiter, handle(async (req, res) => {
   noStore(res);
   res.status(201).json(await reissueInvitation(req.user!.id, req.params.userId));
+}));
+// Deactivate (ACTIVE → SUSPENDED, sessions ended) or reactivate a Team Lead who had activated.
+teamManagementRoutes.post('/team-leads/:userId/deactivate', writeLimiter, handle(async (req, res) => {
+  res.json(await deactivateTeamLead(req.user!.id, req.params.userId));
+}));
+teamManagementRoutes.post('/team-leads/:userId/reactivate', writeLimiter, handle(async (req, res) => {
+  res.json(await reactivateTeamLead(req.user!.id, req.params.userId));
 }));
 teamManagementRoutes.post('/invitations/:invitationId/revoke', writeLimiter, handle(async (req, res) => {
   res.json(await revokeInvitation(req.user!.id, req.params.invitationId));

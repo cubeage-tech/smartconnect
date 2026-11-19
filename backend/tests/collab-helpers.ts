@@ -22,9 +22,10 @@ export const createWorkspace = async (owner: TestUser, name = `WS ${Date.now()}-
 };
 
 /**
- * T.21: public sign-up is invitation-only. A real pending e-mail invitation
- * for `email`, issued by the owner (a Team Lead) of one workspace shared by
- * the calling test file. Pass the token as `inviteToken` on sign-up.
+ * A real pending e-mail invitation for `email`, issued by the owner (a Team
+ * Lead) of one workspace shared by the calling test file. Pass the token as
+ * `inviteToken` on sign-up to also join that workspace (sign-up itself is
+ * public; it was invitation-only from T.21).
  */
 let inviter: Promise<{ ownerId: string; workspaceId: string }> | null = null;
 export const invitationFor = async (email: string) => {

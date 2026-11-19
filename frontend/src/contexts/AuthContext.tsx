@@ -3,6 +3,15 @@ import axios from 'axios';
 import { applyTabSessionUrl, clearStoredToken, readStoredToken, writeStoredToken } from '../lib/devTabSession';
 import { User } from '../types';
 
+/** Public sign-up fields. No role or permission is ever sent — the server makes every sign-up a Member. */
+export interface SignupDetails {
+  fullName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  inviteToken?: string;
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -15,16 +24,11 @@ interface AuthContextType {
     password: string
   ) => Promise<void>;
 
-  // Direct, single-step signup — active path right now (no email/OTP
-  // round-trip). Creates the account and hydrates the session immediately.
-  // T.21: sign-up is invitation-only — inviteToken is the e-mail invitation
-  // (verified by the server) that this address was invited with.
-  signup: (
-    username: string,
-    email: string,
-    password: string,
-    inviteToken?: string
-  ) => Promise<void>;
+  // Public, single-step signup — active path right now (no email/OTP
+  // round-trip). Creates a Member account in SmartConnect Collab and hydrates
+  // the session immediately. inviteToken (optional) is the e-mail invitation
+  // this address was invited with; the server applies it only if still valid.
+  signup: (details: SignupDetails) => Promise<void>;
 
   // Step 1 of sign-up: requests an email OTP. No session exists yet — the
   // account isn't created until verifySignupOtp succeeds.
@@ -251,19 +255,15 @@ export const AuthProvider: React.FC<{
     setUser(newUser);
   };
 
-  const signup = async (
-    username: string,
-    email: string,
-    password: string,
-    inviteToken?: string
-  ) => {
+  const signup = async ({ fullName, email, password, confirmPassword, inviteToken }: SignupDetails) => {
     const res = await axios.post<{
       token: string;
       user: User;
     }>('/api/auth/signup', {
-      username,
+      fullName,
       email,
       password,
+      confirmPassword,
       ...(inviteToken ? { inviteToken } : {}),
     });
 

@@ -288,7 +288,7 @@ describe('Stage 6B — pending R2: cross-path races (need the lower(email) uniqu
 });
 
 describe('Stage 6B — R1: an invitation revoked while its sign-up is in flight (fixed in 6C)', () => {
-  it('C1 (#5) revocation that commits before the account does means no account', async () => {
+  it('C1 (#5) revocation that commits before the account does means no workspace access (sign-up is public: Collab only)', async () => {
     const email = uniqueEmail();
     const invitation = await invite(email);
     let release!: () => void;
@@ -313,8 +313,10 @@ describe('Stage 6B — R1: an invitation revoked while its sign-up is in flight 
       await holder;
     }
     const res = await signedUp;
-    expect(res.status).toBe(403); // the gate's uniform invitation-only answer
-    expect(await accountsFor(email)).toBe(0);
+    expect(res.status).toBe(201);
+    expect(res.body.invitation).toBeNull(); // the revoked invitation is never applied
+    expect(await accountsFor(email)).toBe(1);
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id, workspaceId } })).toBe(0);
   }, 30_000);
 });
 

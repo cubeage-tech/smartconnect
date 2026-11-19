@@ -16,14 +16,17 @@ vi.mock('../utils/mailer', () => ({
 import { sendOtpEmail } from '../utils/mailer';
 
 /**
- * Stage 6A (T.25) — AUTH-1: one sign-up invitation must open at most one
- * account. The invitation-only gate (T.21) matches the invited address in any
+ * Stage 6A (T.25) — AUTH-1: one e-mail address opens at most one account,
+ * whatever its letter case. An invitation matches the invited address in any
  * letter case, so every sign-up path must also treat "Alice@X.com" and
  * "alice@x.com" as the same, existing account — including when several
- * requests race with one invitation. Disposable test database only.
+ * requests race with one invitation. Sign-up is public now (it was
+ * invitation-only from T.21): an unusable invitation no longer refuses the
+ * sign-up, it just grants nothing beyond SmartConnect Collab.
+ * Disposable test database only.
  */
 const PASSWORD = 'Password123!';
-const INVITE_ONLY = 'Sign-up is by invitation only. Open the invitation link you received to create your account.';
+const DUPLICATE = 'A user with this email or username already exists';
 const post = (path: string, body: Record<string, unknown>) => request(app).post(path).send(body);
 const signup = (body: Record<string, unknown>) => post('/api/auth/signup', body);
 
@@ -87,7 +90,7 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
       expect(res.status, variant).toBe(400);
       expect(res.body.error, variant).toMatch(/already exists/);
       // The invitation the account signed up with was accepted and opens nothing more.
-      expect((await signup({ username: uniqueUsername(), email: variant, password: PASSWORD, inviteToken })).status, variant).toBe(403);
+      expect((await signup({ username: uniqueUsername(), email: variant, password: PASSWORD, inviteToken })).status, variant).toBe(400);
     }
     expect(await accountsFor(email)).toBe(1);
   });
@@ -107,7 +110,7 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     expect(await accountsFor(email)).toBe(1);
   });
 
-  it('4. a consumed invitation is refused: sign-up accepts it, so reusing it in any letter case is refused (403)', async () => {
+  it('4. a consumed invitation opens no second account: reusing it in any letter case is refused as a duplicate', async () => {
     const { invite, workspaceId } = await inviter();
     const email = uniqueEmail();
     const inviteToken = await invite(email);
@@ -124,29 +127,30 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     expect(await invitationStatus(inviteToken)).toBe('accepted');
     for (const address of [email, ...variants(email)]) {
       const res = await signup({ username: uniqueUsername(), email: address, password: PASSWORD, inviteToken });
-      expect(res.status, address).toBe(403);
-      expect(res.body.error).toBe(INVITE_ONLY);
+      expect(res.status, address).toBe(400);
+      expect(res.body.error).toBe(DUPLICATE);
     }
     expect(await accountsFor(email)).toBe(1);
   });
 
-  it('5–7. expired, revoked and mismatched invitations are refused and create nothing', async () => {
-    const { invite } = await inviter();
-    const email = uniqueEmail();
-    const refused = {
-      expired: await invite(email, { createdAt: new Date(Date.now() - 15 * 24 * 3600_000) }),
-      revoked: await invite(email, { status: 'revoked' }),
-      mismatched: await invite(uniqueEmail()),
-    };
-    for (const [why, inviteToken] of Object.entries(refused)) {
-      for (const path of ['/api/auth/signup', '/api/auth/signup-request']) {
-        const res = await post(path, { username: uniqueUsername(), email, password: PASSWORD, inviteToken });
-        expect(res.status, `${why} ${path}`).toBe(403);
-        expect(res.body.error).toBe(INVITE_ONLY);
-      }
+  it('5–7. expired, revoked and mismatched invitations grant nothing: the account gets Collab only and the invitation is untouched', async () => {
+    const { invite, workspaceId } = await inviter();
+    const cases: [string, string, string][] = [];
+    for (const [why, extra] of [['expired', { createdAt: new Date(Date.now() - 15 * 24 * 3600_000) }], ['revoked', { status: 'revoked' }]] as const) {
+      const email = uniqueEmail();
+      cases.push([why, email, await invite(email, extra)]);
     }
-    expect(await accountsFor(email)).toBe(0);
-    expect(sendOtpEmail).not.toHaveBeenCalled();
+    cases.push(['mismatched', uniqueEmail(), await invite(uniqueEmail())]);
+    for (const [why, email, inviteToken] of cases) {
+      const before = await invitationStatus(inviteToken);
+      const res = await signup({ username: uniqueUsername(), email, password: PASSWORD, inviteToken });
+      expect(res.status, why).toBe(201);
+      expect(res.body.invitation, why).toBeNull();
+      expect(res.body.user.lastActiveWorkspaceId, why).toBe(collabId);
+      expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id, workspaceId } }), why).toBe(0);
+      expect(await invitationStatus(inviteToken), why).toBe(before);
+      expect(await accountsFor(email), why).toBe(1);
+    }
   });
 
   it('8. concurrent sign-ups with one invitation (direct and OTP paths, exact and case variants) create exactly one account', async () => {
@@ -218,8 +222,8 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     expect(await prisma.workspaceMember.count({ where: { userId: verified.body.user.id, workspaceId } })).toBe(1);
   });
 
-  it('11. the gate and the account check use one comparison: an address PostgreSQL does not fold to the invited one is refused', async () => {
-    const { invite } = await inviter();
+  it('11. invitation matching and the account check use one comparison: an address PostgreSQL does not fold to the invited one gets nothing from it', async () => {
+    const { invite, workspaceId } = await inviter();
     // JavaScript lower-cases a word-final "Σ" to "ς"; PostgreSQL's lower() gives "σ".
     const local = `sigma${randomUUID().slice(0, 8)}a`;
     const invited = `${local}ς@example.com`;
@@ -227,9 +231,14 @@ describe('Stage 6A — AUTH-1: one invitation, at most one account', () => {
     const first = await signup({ username: uniqueUsername(), email: invited, password: PASSWORD, inviteToken });
     expect(first.status).toBe(201);
     const capital = `${local}Σ@example.com`;
-    expect(capital.toLowerCase()).toBe(invited); // the gate's JavaScript check alone would accept it
+    expect(capital.toLowerCase()).toBe(invited); // a JavaScript check alone would call it the same address
+    // PostgreSQL (the one definition of "same address") says it is another
+    // address, so public sign-up may create it — but the invitation is never
+    // applied to it, and it never reaches the invited workspace.
     const second = await signup({ username: uniqueUsername(), email: capital, password: PASSWORD, inviteToken });
-    expect(second.status).not.toBe(201);
-    expect(await prisma.user.count({ where: { email: { startsWith: local } } })).toBe(1);
+    expect(second.status).toBe(201);
+    expect(second.body.invitation).toBeNull();
+    expect(await prisma.workspaceMember.count({ where: { userId: second.body.user.id, workspaceId } })).toBe(0);
+    expect(await prisma.workspaceMember.count({ where: { userId: first.body.user.id, workspaceId } })).toBe(1);
   });
 });

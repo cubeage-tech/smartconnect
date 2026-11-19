@@ -9,9 +9,10 @@ import { ensureSharedWorkspaceMembership } from './sharedWorkspace';
 /**
  * First Company Admin bootstrap (T.32, audit H6).
  *
- * A fresh database has no administrator, sign-up is invitation-only, and the
- * development seeds refuse production — so nobody could administer a new
- * deployment. This creates exactly one platform ADMIN account, once:
+ * A fresh database has no administrator, public sign-up only ever creates
+ * Members, and the development seeds refuse production — so nobody could
+ * administer a new deployment. This creates exactly one platform ADMIN
+ * account, once:
  *
  * - CLI only (scripts/bootstrap-admin.ts): there is no HTTP endpoint for it.
  * - Requires the explicit confirmation phrase below.

@@ -1,10 +1,11 @@
 import axios from 'axios';
 import { ArrowRight, Eye, EyeOff, Loader2, Lock, Shield, ShieldCheck, Zap } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { isInvitationToken } from '../../lib/invitationToken';
+import { type SignupErrors, type SignupInput, validateSignup } from '../../lib/signupValidation';
 import { BrandMark } from '../ui/Brand';
 
 interface AuthFormProps {
@@ -15,19 +16,31 @@ interface AuthFormProps {
   presetEmail?: string;
 }
 
+const FIELD_ORDER: (keyof SignupInput)[] = ['fullName', 'email', 'password', 'confirmPassword'];
+const FIELD_IDS: Record<keyof SignupInput, string> = {
+  fullName: 'auth-name',
+  email: 'auth-email',
+  password: 'auth-password',
+  confirmPassword: 'auth-confirm-password',
+};
+
 export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) => {
   const { login, signup } = useAuth();
   const [isLogin, setIsLogin] = useState(!startOnSignup);
   const [email, setEmail] = useState(presetEmail ?? '');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<SignupErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string, type: 'error' | 'success' } | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
-  // T.21: sign-up is invitation-only. An e-mail invitation's token arrives as
-  // ?inviteToken= (InviteHandler → /signup) and goes with the sign-up request;
-  // the server verifies it. Only a well-formed token is ever sent.
+  // Sign-up is public. An e-mail invitation's token may arrive as
+  // ?inviteToken= (InviteHandler → /signup) and goes with the sign-up request,
+  // so the new account also joins the invited workspace; the server verifies
+  // it. Only a well-formed token is ever sent.
   const [searchParams] = useSearchParams();
   const rawInviteToken = searchParams.get('inviteToken');
   const inviteToken = isInvitationToken(rawInviteToken) ? rawInviteToken : undefined;
@@ -35,20 +48,42 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
   // Admin Portal State
   const [isAdminMode, setIsAdminMode] = useState(false);
 
+  const switchMode = (toLogin: boolean) => {
+    setIsLogin(toLogin);
+    setMessage(null);
+    setFieldErrors({});
+  };
+
+  /** Clears a field's error as soon as the person edits it. */
+  const edit = (field: keyof SignupInput, set: (value: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    set(e.target.value);
+    if (fieldErrors[field]) setFieldErrors((errors) => ({ ...errors, [field]: undefined }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
     setMessage(null);
+    const signingUp = !isAdminMode && !isLogin;
+    if (signingUp) {
+      const errors = validateSignup({ fullName, email, password, confirmPassword });
+      setFieldErrors(errors);
+      const first = FIELD_ORDER.find((field) => errors[field]);
+      if (first) {
+        formRef.current?.querySelector<HTMLInputElement>(`#${FIELD_IDS[first]}`)?.focus();
+        return;
+      }
+    }
+    setLoading(true);
     try {
-      if (isAdminMode || isLogin) {
+      if (!signingUp) {
         await login(email, password);
       } else {
         // Direct signup, no email/OTP round-trip — see auth.service.ts's
-        // signup for why (email delivery isn't reliably reachable in
-        // production right now). AuthContext hydrates the session on
-        // success; the router redirects away from here on its own.
-        await signup(username, email, password, inviteToken);
-        toast.success('Account created — welcome aboard!');
+        // signup. Only these fields are sent: the server makes every new
+        // account a Member of SmartConnect Collab. AuthContext hydrates the
+        // session on success; the router then lands them in the workspace.
+        await signup({ fullName: fullName.trim(), email: email.trim(), password, confirmPassword, inviteToken });
+        toast.success('Account created — welcome to SmartConnect Collab!');
       }
     } catch (err: any) {
       const text = err.response?.data?.error || 'Authentication failed';
@@ -80,8 +115,10 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
     setIsAdminMode(!isAdminMode);
     setIsLogin(true);
     setMessage(null);
+    setFieldErrors({});
     setEmail('');
     setPassword('');
+    setConfirmPassword('');
   };
 
   // T.32 design: one sign-in surface for both modes. The administrator mode
@@ -89,7 +126,16 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
   // (the server decides who is an administrator).
   const isSignup = !isAdminMode && !isLogin;
   const fieldClass =
-    'block h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-brand disabled:cursor-not-allowed disabled:bg-surface-tertiary disabled:text-fg-muted';
+    'block h-10 w-full rounded-lg border border-line bg-surface px-3 text-sm text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-brand disabled:cursor-not-allowed disabled:bg-surface-tertiary disabled:text-fg-muted aria-[invalid=true]:border-danger';
+  const errorOf = (field: keyof SignupInput) => (isSignup ? fieldErrors[field] : undefined);
+  const describedBy = (field: keyof SignupInput, ...more: (string | false)[]) =>
+    [errorOf(field) && `${FIELD_IDS[field]}-error`, ...more].filter(Boolean).join(' ') || undefined;
+  const fieldError = (field: keyof SignupInput) =>
+    errorOf(field) ? (
+      <p id={`${FIELD_IDS[field]}-error`} className="mt-1.5 text-xs text-danger">
+        {errorOf(field)}
+      </p>
+    ) : null;
 
   return (
     <div className="flex min-h-screen bg-surface-secondary font-sans">
@@ -116,7 +162,7 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
                 ]
               : [
                   { icon: <Zap size={15} aria-hidden="true" />, text: 'Real-time messages, reactions and threads' },
-                  { icon: <ShieldCheck size={15} aria-hidden="true" />, text: 'Invitation-only workspaces and private files' },
+                  { icon: <ShieldCheck size={15} aria-hidden="true" />, text: 'Private team workspaces and files' },
                 ]
             ).map((item) => (
               <li key={item.text} className="flex items-center gap-3">
@@ -139,8 +185,8 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
 
           {!isAdminMode && (
             <div role="tablist" aria-label="Sign in or sign up" className="mb-7 grid grid-cols-2 gap-1 rounded-lg bg-surface-tertiary p-1">
-              <button type="button" role="tab" aria-selected={isLogin} onClick={() => { setIsLogin(true); setMessage(null); }} className={`rounded-md py-1.5 text-sm font-medium transition-colors ${isLogin ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}>Login</button>
-              <button type="button" role="tab" aria-selected={!isLogin} onClick={() => { setIsLogin(false); setMessage(null); }} className={`rounded-md py-1.5 text-sm font-medium transition-colors ${!isLogin ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}>Sign Up</button>
+              <button type="button" role="tab" aria-selected={isLogin} onClick={() => switchMode(true)} className={`rounded-md py-1.5 text-sm font-medium transition-colors ${isLogin ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}>Login</button>
+              <button type="button" role="tab" aria-selected={!isLogin} onClick={() => switchMode(false)} className={`rounded-md py-1.5 text-sm font-medium transition-colors ${!isLogin ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'}`}>Sign Up</button>
             </div>
           )}
 
@@ -159,8 +205,8 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
                 : isLogin
                   ? 'Enter your details to continue.'
                   : inviteToken
-                    ? 'Create your account to get started.'
-                    : 'Sign-up is by invitation only — open the invitation link you received.'}
+                    ? 'Create your account to join the workspace you were invited to.'
+                    : 'Join SmartConnect Collab, the shared workspace for everyone.'}
             </p>
           </div>
 
@@ -174,11 +220,24 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-4" noValidate={isSignup}>
             {isSignup && (
               <div>
                 <label htmlFor="auth-name" className="mb-1.5 block text-xs font-medium text-fg-muted">Full name</label>
-                <input id="auth-name" required type="text" autoComplete="name" value={username} onChange={(e) => setUsername(e.target.value)} className={fieldClass} placeholder="Samarth Karale" />
+                <input
+                  id="auth-name"
+                  required
+                  type="text"
+                  autoComplete="name"
+                  maxLength={120}
+                  value={fullName}
+                  onChange={edit('fullName', setFullName)}
+                  aria-invalid={!!errorOf('fullName')}
+                  aria-describedby={describedBy('fullName')}
+                  className={fieldClass}
+                  placeholder="Samarth Karale"
+                />
+                {fieldError('fullName')}
               </div>
             )}
 
@@ -190,13 +249,16 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
                 type="email"
                 autoComplete="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={edit('email', setEmail)}
                 disabled={isSignup && !!presetEmail}
                 readOnly={isSignup && !!presetEmail}
+                aria-invalid={!!errorOf('email')}
+                aria-describedby={describedBy('email', isSignup && !!presetEmail && 'auth-email-invite-note')}
                 className={fieldClass}
                 placeholder="you@company.com"
               />
-              {isSignup && !!presetEmail && <p className="mt-1.5 text-xs text-fg-subtle">This invite was sent to this address.</p>}
+              {fieldError('email')}
+              {isSignup && !!presetEmail && <p id="auth-email-invite-note" className="mt-1.5 text-xs text-fg-subtle">This invite was sent to this address.</p>}
             </div>
 
             <div>
@@ -215,7 +277,9 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
                   type={showPassword ? 'text' : 'password'}
                   autoComplete={isSignup ? 'new-password' : 'current-password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={edit('password', setPassword)}
+                  aria-invalid={!!errorOf('password')}
+                  aria-describedby={describedBy('password', isSignup && 'auth-password-hint')}
                   className={`${fieldClass} pr-10`}
                   placeholder="••••••••"
                 />
@@ -229,7 +293,28 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
                   {showPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
                 </button>
               </div>
+              {fieldError('password')}
+              {isSignup && !errorOf('password') && <p id="auth-password-hint" className="mt-1.5 text-xs text-fg-subtle">At least 6 characters.</p>}
             </div>
+
+            {isSignup && (
+              <div>
+                <label htmlFor="auth-confirm-password" className="mb-1.5 block text-xs font-medium text-fg-muted">Confirm password</label>
+                <input
+                  id="auth-confirm-password"
+                  required
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={edit('confirmPassword', setConfirmPassword)}
+                  aria-invalid={!!errorOf('confirmPassword')}
+                  aria-describedby={describedBy('confirmPassword')}
+                  className={fieldClass}
+                  placeholder="••••••••"
+                />
+                {fieldError('confirmPassword')}
+              </div>
+            )}
 
             <button
               disabled={loading}
@@ -239,6 +324,16 @@ export const AuthForm = ({ startOnSignup = false, presetEmail }: AuthFormProps) 
               {loading ? <Loader2 size={16} className="animate-spin" aria-label="Working" /> : <>{isAdminMode || isLogin ? 'Sign In' : 'Create Account'} {isAdminMode ? <Lock size={14} aria-hidden="true" /> : <ArrowRight size={15} aria-hidden="true" />}</>}
             </button>
           </form>
+
+          {!isAdminMode && (
+            <p className="mt-5 text-center text-sm text-fg-muted">
+              {/* Labels avoid "Sign In" / "Create Account": the submit button is the only control with those names. */}
+              {isLogin ? 'New to SmartConnect?' : 'Already have an account?'}{' '}
+              <button type="button" onClick={() => switchMode(!isLogin)} className="font-medium text-brand hover:text-brand-hover">
+                {isLogin ? 'Sign up for free' : 'Log in instead'}
+              </button>
+            </p>
+          )}
 
           <div className="mt-8 border-t border-line pt-5 text-center">
             <button type="button" onClick={toggleAdminMode} className="text-xs font-medium text-fg-subtle transition-colors hover:text-fg">

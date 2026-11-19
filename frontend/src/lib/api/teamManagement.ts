@@ -68,9 +68,31 @@ export interface NewTeamLead {
   teamLabel?: string;
 }
 
+/**
+ * 409 body from addTeamLead when the address already has an account (read
+ * from ApiError.data): never a second account — the admin may instead make
+ * that account a Team Lead (promoteTeamLead) when `promotable` is true.
+ */
+export interface TeamLeadConflict {
+  error: string;
+  existingAccount?: boolean;
+  promotable?: boolean;
+  reason?: string;
+  user?: { id: string; username: string; displayName: string | null; status: TeamLeadAccountStatus };
+}
+
 export const listTeamLeads = () => http.get<{ teamLeads: TeamLead[] }>('/api/team-management/team-leads');
 
 export const addTeamLead = (body: NewTeamLead) => http.post<ProvisionResult>('/api/team-management/team-leads', body);
+
+/** Company Admin only: an existing, active account (e.g. a self-registered Member) becomes a Team Lead. */
+export const promoteTeamLead = (userId: string) => http.post<{ teamLead: TeamLead }>('/api/team-management/team-leads/promote', { userId });
+
+/** Company Admin only: the Team Lead can no longer sign in (sessions end at once); everything they own is kept. */
+export const deactivateTeamLead = (userId: string) => http.post<{ teamLead: TeamLead }>(`/api/team-management/team-leads/${seg(userId)}/deactivate`);
+
+/** Company Admin only: restores a deactivated Team Lead who had activated their account. */
+export const reactivateTeamLead = (userId: string) => http.post<{ teamLead: TeamLead }>(`/api/team-management/team-leads/${seg(userId)}/reactivate`);
 
 export const revokeInvitation = (invitationId: string) =>
   http.post<{ invitation: TeamLeadInvitation }>(`/api/team-management/invitations/${seg(invitationId)}/revoke`);

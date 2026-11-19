@@ -18,7 +18,6 @@ import notificationRoutes from './modules/notifications/notifications.routes';
 import organizationRoutes from './modules/organizations/organizations.routes';
 import projectRoutes from './modules/projects/projects.routes';
 import { accountActivationRoutes, teamManagementRoutes, teamMemberRoutes } from './modules/teamManagement/teamManagement.routes';
-import { INVITE_ONLY_SIGNUP_PATHS, requireSignupInvitation, signupGateLimiter } from './middleware/inviteOnlySignup.middleware';
 import { companyOverviewRoutes } from './modules/companyOverview/companyOverview.routes';
 import uploadRoutes, { handleUploadErrors } from './modules/uploads/message.routes';
 import usersRoutes from './modules/users/users.routes';
@@ -90,10 +89,9 @@ app.get('/api/ready', async (_req, res) => {
   res.status(ready ? 200 : 503).json({ ready, database, redis, draining });
 });
 
-// Stage 2 finalization (T.21): sign-up is invitation-only. The gate runs in
-// front of the unchanged auth router for the three sign-up endpoints only —
-// login, /me, password reset, JWT and sessions are not involved.
-app.post(INVITE_ONLY_SIGNUP_PATHS, signupGateLimiter, requireSignupInvitation);
+// Sign-up is public (it was invitation-only from T.21): every self-registered
+// account is a plain Member of SmartConnect Collab (auth.service signup). The
+// sign-up endpoints keep their own per-client rate limits in the auth router.
 app.use('/api/auth', authRoutes);
 app.use('/api/channels', channelsRoutes);
 app.use('/api/channels', messagesRoutes);

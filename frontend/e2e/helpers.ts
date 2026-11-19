@@ -23,11 +23,11 @@ export const trackPageErrors = (page: Page) => {
 };
 
 /**
- * Gives a test a fresh, signed-in account. T.21: public sign-up is now
- * invitation-only, so throwaway accounts are created directly in the LOCAL
- * E2E database (bcrypt via pgcrypto — the same $2a$ hashes the server
- * verifies), then signed in through the real login form. The invited sign-up
- * flow itself is covered end to end in stage2-team-lead.spec.ts.
+ * Gives a test a fresh, signed-in account, created directly in the LOCAL E2E
+ * database (bcrypt via pgcrypto — the same $2a$ hashes the server verifies;
+ * the username is the one the test chose), then signed in through the real
+ * login form. The public sign-up form itself is covered end to end in
+ * stage2-team-lead.spec.ts.
  */
 export const signUp = async (page: Page, user: E2EUser) => {
   if (!LOCAL_DB.test(DB)) throw new Error('Refusing to touch a non-local database.');

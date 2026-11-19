@@ -241,16 +241,20 @@ describe('Stage 3 — Member activation and access', () => {
 });
 
 describe('Stage 3 — existing users, reusable links and isolation', () => {
-  it('an existing user joins through a reusable link with approval; the link never creates an account; concurrent approvals are safe', async () => {
+  it('an existing user joins through a reusable link with approval; the link never lets a sign-up into the workspace; concurrent approvals are safe', async () => {
     const { lead, workspaceId } = await teamLeadWithWorkspace();
     const existing = await createAndLoginUser();
     const link = await as(lead).get(`/api/workspaces/${workspaceId}/invite-link`);
     const joinToken = new URL(link.body.url).searchParams.get('token')!;
 
-    // A brand-new person cannot turn the reusable link into an account.
+    // Sign-up is public, but a brand-new person cannot use the reusable link to
+    // skip approval: the account gets SmartConnect Collab only.
     const stranger = { username: `s_${tag()}`, email: `stranger-${tag()}@example.com`, password: 'Password123!' };
-    expect((await request(app).post('/api/auth/signup').send({ ...stranger, inviteToken: joinToken })).status).toBe(403);
-    expect(await prisma.user.count({ where: { email: stranger.email } })).toBe(0);
+    const signedUp = await request(app).post('/api/auth/signup').send({ ...stranger, inviteToken: joinToken });
+    expect(signedUp.status).toBe(201);
+    expect(signedUp.body.invitation).toBeNull();
+    expect(await prisma.workspaceMember.count({ where: { userId: signedUp.body.user.id, workspaceId } })).toBe(0);
+    expect(await prisma.workspaceJoinRequest.count({ where: { userId: signedUp.body.user.id } })).toBe(0);
 
     expect((await as(existing).post('/api/workspaces/join', { token: joinToken })).body).toMatchObject({ status: 'pending' });
     const requests = (await as(lead).get(`/api/workspaces/${workspaceId}/requests`)).body;

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamManagement } from './TeamManagement';
 
-/** Stage 2 (T.20) — Admin → Team Management: list, add (credentials shown once), revoke, reissue. */
+/** Stage 2 (T.20) — Admin → Team Management: list, add (credentials shown once), revoke, reissue, promote, deactivate, reactivate. */
 
 vi.mock('axios', () => ({
   default: {
@@ -42,7 +42,7 @@ const LEADS = [
   lead('u2', 'Omar', 'ACCEPTED'),
   lead('u3', 'Lena', 'EXPIRED', { status: 'SUSPENDED' }),
   lead('u4', 'Kenji', 'REVOKED', { status: 'SUSPENDED' }),
-  lead('u5', 'Zara', 'ACCEPTED', { status: 'SUSPENDED' }), // activated, later suspended by an admin
+  lead('u5', 'Zara', 'ACCEPTED', { status: 'SUSPENDED' }), // activated, later deactivated by an admin
 ];
 const CREDENTIALS = {
   loginId: 'nadia@acme.io',
@@ -76,10 +76,10 @@ describe('Team Management (Stage 2)', () => {
     // Never activated: shown as awaiting activation, not as an admin suspension.
     for (const name of ['Priya', 'Lena', 'Kenji']) {
       expect(row(name).getByText('Awaiting activation')).toBeInTheDocument();
-      expect(row(name).queryByText('Suspended')).not.toBeInTheDocument();
+      expect(row(name).queryByText('Deactivated')).not.toBeInTheDocument();
     }
     expect(row('Omar').getByText('Active')).toBeInTheDocument();
-    expect(row('Zara').getByText('Suspended')).toBeInTheDocument();
+    expect(row('Zara').getByText('Deactivated')).toBeInTheDocument();
     expect(row('Priya').getByText('priya@acme.io')).toBeInTheDocument();
     expect(api.get).toHaveBeenCalledWith('/api/team-management/team-leads');
   });
@@ -171,5 +171,69 @@ describe('Team Management (Stage 2)', () => {
     expect(within(shown).getByText(CREDENTIALS.temporaryPassword)).toBeInTheDocument();
     // Accepted invitations can't be reissued.
     expect(within(screen.getByText('Omar').closest('li') as HTMLElement).queryByRole('button', { name: /Reissue/ })).not.toBeInTheDocument();
+  });
+
+  it('offers to make an existing (e.g. self-registered) account a Team Lead instead of creating a duplicate', async () => {
+    const conflict = {
+      error: 'An account with this e-mail address already exists.',
+      existingAccount: true,
+      promotable: true,
+      user: { id: 'u9', username: 'mia', displayName: 'Mia Chen', status: 'ACTIVE' },
+    };
+    api.post
+      .mockRejectedValueOnce({ response: { status: 409, data: conflict } })
+      .mockResolvedValueOnce({ data: { teamLead: lead('u9', 'Mia', 'ACCEPTED', { invitation: null }) } });
+    render(<TeamManagement />);
+    await screen.findByText('Priya');
+    fireEvent.click(screen.getByRole('button', { name: 'Add Team Lead' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add Team Lead' });
+    fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: 'mia@acme.io' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Team Lead' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Make Mia Chen a Team Lead' }));
+
+    await waitFor(() => expect(api.post).toHaveBeenLastCalledWith('/api/team-management/team-leads/promote', { userId: 'u9' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add Team Lead' })).not.toBeInTheDocument());
+    expect(await screen.findByText('Mia is now a Team Lead.')).toBeInTheDocument();
+    const row = within(screen.getByText('Mia').closest('li') as HTMLElement);
+    expect(row.getByText('Existing account — no activation needed')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Team Lead invitation' })).not.toBeInTheDocument(); // no credentials for an existing account
+  });
+
+  it('explains why an existing account cannot be promoted', async () => {
+    api.post.mockRejectedValueOnce({
+      response: { status: 409, data: { error: 'An account with this e-mail address already exists.', existingAccount: true, promotable: false, reason: 'This account is already a Team Lead.', user: { id: 'u2', username: 'omar', displayName: 'Omar', status: 'ACTIVE' } } },
+    });
+    render(<TeamManagement />);
+    await screen.findByText('Priya');
+    fireEvent.click(screen.getByRole('button', { name: 'Add Team Lead' }));
+    const dialog = screen.getByRole('dialog', { name: 'Add Team Lead' });
+    fireEvent.change(within(dialog).getByLabelText(/E-mail address/), { target: { value: 'omar@acme.io' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create Team Lead' }));
+    expect(await within(dialog).findByText('This account is already a Team Lead.')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: /Make .* a Team Lead/ })).not.toBeInTheDocument();
+  });
+
+  it('deactivates an active Team Lead after confirmation, and reactivates a deactivated one', async () => {
+    api.post
+      .mockResolvedValueOnce({ data: { teamLead: lead('u2', 'Omar', 'ACCEPTED', { status: 'SUSPENDED' }) } })
+      .mockResolvedValueOnce({ data: { teamLead: lead('u5', 'Zara', 'ACCEPTED', { status: 'ACTIVE' }) } });
+    render(<TeamManagement />);
+    const omar = within((await screen.findByText('Omar')).closest('li') as HTMLElement);
+    fireEvent.click(omar.getByRole('button', { name: 'Deactivate Omar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/team-management/team-leads/u2/deactivate', undefined));
+    expect(await omar.findByText('Deactivated')).toBeInTheDocument();
+    expect(omar.getByRole('button', { name: 'Reactivate Omar' })).toBeInTheDocument();
+
+    const zara = within(screen.getByText('Zara').closest('li') as HTMLElement);
+    fireEvent.click(zara.getByRole('button', { name: 'Reactivate Zara' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/team-management/team-leads/u5/reactivate', undefined));
+    expect(await zara.findByText('Active')).toBeInTheDocument();
+
+    // Team Leads still awaiting activation are neither deactivated nor reactivated here (revoke / reissue instead).
+    for (const name of ['Priya', 'Lena', 'Kenji']) {
+      const row = within(screen.getByText(name).closest('li') as HTMLElement);
+      expect(row.queryByRole('button', { name: /Deactivate|Reactivate/ })).not.toBeInTheDocument();
+    }
   });
 });

@@ -68,8 +68,8 @@ Both are baked in at build time.
 
 ## First Company Admin (new database)
 
-Sign-up is invitation-only, so a new deployment needs its first administrator
-created once, from a shell with access to the database:
+Public sign-up only ever creates Members, so a new deployment needs its first
+administrator created once, from a shell with access to the database:
 
 ```bash
 cd backend
@@ -81,7 +81,20 @@ npm run admin:bootstrap
 ```
 
 It refuses if any administrator already exists, never prints the password and
-writes an audit entry. Everyone else is invited from the admin console.
+writes an audit entry.
+
+## Accounts and roles
+
+| Who | How they get an account | What they can do |
+|---|---|---|
+| Member | Public sign-up (`/signup`: full name, e-mail, password), or an invitation from a Team Lead | Joins **SmartConnect Collab** automatically; sees only Collab and the workspaces they were invited to and accepted |
+| Team Lead | Created by a Company Admin (Admin → Team Management), who e-mails a single-use activation link; or an existing account the admin makes a Team Lead | Creates project workspaces and invites/manages members of the workspaces they own |
+| Company Admin | `npm run admin:bootstrap` (first one), then Admin → Users | Creates, promotes, deactivates and reactivates Team Leads; platform administration |
+
+A sign-up request can never choose a role: the server ignores any role, tier
+or permission in the body. Only Company Admin endpoints grant the Team Lead
+role. Public sign-up does not verify e-mail ownership (the OTP endpoints
+`/api/auth/signup-request` + `/api/auth/verify-otp` do, and stay available).
 
 ## Tests
 

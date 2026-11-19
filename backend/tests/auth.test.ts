@@ -75,8 +75,8 @@ describe('signup -> verify -> login -> me', () => {
       .post('/api/auth/signup-request')
       .send({ username: uniqueUsername(), email, password, inviteToken: await invitationFor(email) });
     expect(secondAttempt.status).toBe(400);
-    // The first invitation was accepted by that sign-up and opens nothing more.
-    expect((await request(app).post('/api/auth/signup-request').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(403);
+    // The first invitation was accepted by that sign-up and opens no second account.
+    expect((await request(app).post('/api/auth/signup-request').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(400);
   });
 });
 
@@ -113,8 +113,8 @@ describe('direct signup (no OTP)', () => {
       .post('/api/auth/signup')
       .send({ username: uniqueUsername(), email, password, inviteToken: await invitationFor(email) });
     expect(res.status).toBe(400);
-    // The first invitation was accepted by that sign-up and opens nothing more.
-    expect((await request(app).post('/api/auth/signup').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(403);
+    // The first invitation was accepted by that sign-up and opens no second account.
+    expect((await request(app).post('/api/auth/signup').send({ username: uniqueUsername(), email, password, inviteToken })).status).toBe(400);
   });
 
   it('rejects a too-short password', async () => {

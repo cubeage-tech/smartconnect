@@ -93,23 +93,30 @@ describe('new people: sign-up through a workspace invitation', () => {
     expect(await prisma.workspaceMember.count({ where: { userId, workspaceId } })).toBe(1);
   });
 
-  it('a revoked, expired or other-address invitation creates no account', async () => {
+  it('a revoked, expired or other-address invitation grants no workspace (sign-up is public: Collab only)', async () => {
     const { lead, workspaceId } = await leadWithWorkspace();
 
     const revokedEmail = `revoked-${tag()}@example.com`;
     const revoked = await invite(lead, workspaceId, revokedEmail);
     expect((await as(lead).delete(`/api/workspaces/${workspaceId}/invitations/${revoked.body.id}`)).status).toBe(200);
-    expect((await signUp(revokedEmail, tokenOf(revoked.body.inviteLink))).status).toBe(403);
 
     const expiredEmail = `expired-${tag()}@example.com`;
     const expired = await invite(lead, workspaceId, expiredEmail);
     await prisma.invitation.update({ where: { id: expired.body.id }, data: { createdAt: new Date(Date.now() - 15 * DAY) } });
-    expect((await signUp(expiredEmail, tokenOf(expired.body.inviteLink))).status).toBe(403);
 
     const theirs = await invite(lead, workspaceId, `someone-${tag()}@example.com`);
-    expect((await signUp(`intruder-${tag()}@example.com`, tokenOf(theirs.body.inviteLink))).status).toBe(403);
 
-    expect(await prisma.user.count({ where: { email: { in: [revokedEmail, expiredEmail] } } })).toBe(0);
+    for (const [email, link] of [
+      [revokedEmail, revoked.body.inviteLink],
+      [expiredEmail, expired.body.inviteLink],
+      [`intruder-${tag()}@example.com`, theirs.body.inviteLink],
+    ] as const) {
+      const res = await signUp(email, tokenOf(link));
+      expect(res.status, email).toBe(201);
+      expect(res.body.invitation, email).toBeNull();
+      expect(await workspaceIdsOf(res.body), email).toEqual([collabId]);
+    }
+    expect((await prisma.invitation.findUniqueOrThrow({ where: { id: theirs.body.id } })).status).toBe('pending'); // untouched
   });
 });
 

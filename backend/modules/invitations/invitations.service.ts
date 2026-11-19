@@ -425,10 +425,10 @@ export const declineInvitationByToken = async (token: string, userId: string) =>
  * Sign-up through an e-mail invitation (auth.service signup/verifySignupOtp):
  * inside the transaction that creates the account, consume exactly the
  * invitation whose link was used and add the new account to that workspace as
- * MEMBER (+ its General channel), landing there first. The sign-up gate
- * (inviteOnlySignup.middleware) already checked the token against this
- * address; this re-checks it under the transaction. null = not acceptable
- * (revoked, used or expired meanwhile) — the caller refuses the sign-up.
+ * MEMBER (+ its General channel), landing there first. null = not acceptable
+ * (unknown, revoked, declined, used, expired, another address, or the inviter
+ * may no longer invite) — the account is still created (sign-up is public),
+ * but it gets nothing beyond SmartConnect Collab.
  */
 export const acceptInvitationForNewAccount = async (
   tx: Prisma.TransactionClient,

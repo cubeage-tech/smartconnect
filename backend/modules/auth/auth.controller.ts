@@ -9,10 +9,12 @@ import * as authService from './auth.service';
 // in the account's own session list. No IP address is stored.
 const sessionMeta = (req: AuthenticatedRequest) => ({ userAgent: req.get('user-agent') ?? null });
 
+// Public sign-up. Only these named fields are passed on — a role, tier,
+// status or any other field in the body never reaches the service.
 export const signupHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { username, email, password, inviteToken } = req.body;
-    const result = await authService.signup(username, email, password, sessionMeta(req), inviteToken);
+    const { fullName, username, email, password, confirmPassword, inviteToken } = req.body ?? {};
+    const result = await authService.signup({ fullName, username, email, password, confirmPassword, inviteToken }, sessionMeta(req));
     res.status(201).json(result);
   } catch (err) { next(err); }
 };

@@ -58,7 +58,8 @@ test('workspace invitations: new people sign up into the invited workspace; exis
     const form = SIGNUP_FORM(page);
     await expect(form.locator('input[type="email"]')).toHaveValue(newcomer.email.toLowerCase()); // invitations store the address normalized
     await form.getByPlaceholder('Samarth Karale').fill(newcomer.username);
-    await form.locator('input[type="password"]').fill(newcomer.password);
+    await form.getByLabel('Password', { exact: true }).fill(newcomer.password);
+    await form.getByLabel('Confirm password').fill(newcomer.password);
     await form.getByRole('button', { name: 'Create Account' }).click();
     await page.waitForURL(new RegExp(`/${apolloId}/c/[0-9a-f-]{36}$`));
     await expect(railButton(page, apollo)).toBeVisible();

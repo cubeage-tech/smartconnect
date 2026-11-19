@@ -36,7 +36,7 @@ const timed = async <T>(fn: () => PromiseLike<T>) => {
 
 const signup = (email: unknown, path = '/api/auth/signup', inviteToken?: string) =>
   request(app).post(path).send({ username: uniqueUsername(), email, password: PASSWORD, ...(inviteToken ? { inviteToken } : {}) });
-// T.21: sign-up is invitation-only — legitimate sign-ups carry a real invitation.
+// Sign-ups here also carry a real invitation, exercising the invitation-matching path too.
 const invitedSignup = async (email: string) => signup(email, '/api/auth/signup', await invitationFor(email));
 
 describe('signup e-mail validation (FA-SEC-02)', () => {
