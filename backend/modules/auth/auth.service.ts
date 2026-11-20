@@ -9,7 +9,7 @@ import { passwordProblem } from '../../lib/passwordPolicy';
 import { prisma } from '../../lib/prisma';
 import { issueSession, revokeAllSessions } from '../../lib/sessions';
 import { generateOtp, hashOtp, MAX_OTP_ATTEMPTS, OTP_TTL_MS, verifyOtp as verifyOtpCode } from '../../lib/otp';
-import { ensureSharedWorkspace, SHARED_CHANNELS, SHARED_WORKSPACE_SLUG } from '../../lib/sharedWorkspace';
+import { findSharedWorkspace, SHARED_CHANNELS, SHARED_WORKSPACE_SLUG, SharedWorkspaceMissingError } from '../../lib/sharedWorkspace';
 import { hasSignupConflict, lockSignupEmail, rethrowAsDuplicateAccount } from '../../lib/signupEmail';
 import { uniqueUsername } from '../../lib/username';
 import { sendOtpEmail, sendResetPasswordEmail } from '../../utils/mailer';
@@ -26,8 +26,11 @@ import { ensureOrganizationMembership } from '../organizations/organizations.ser
  * Only the fields named in SignupBody are read: a role, tier, status,
  * workspace, ownership or permission sent in the request body is ignored.
  *
- * In the same transaction as the account, it joins SmartConnect Collab (the
- * shared workspace and its default channels) as MEMBER and lands there.
+ * In the same transaction as the account, it joins the EXISTING SmartConnect
+ * Collab (the shared workspace and its default channels) as MEMBER and lands
+ * there. Sign-up never creates a workspace or a channel: if Collab is missing
+ * that is a configuration/data-integrity error (503) and no account is
+ * created, so nobody is ever left with no workspace at all.
  *
  * An e-mail invitation's token (the ?inviteToken= of the invitation link) is
  * optional. When it is still acceptable for exactly this address, the same
@@ -166,31 +169,21 @@ const equaliseLoginTiming = (password: string) => {
 // pattern runs — the pattern alone could block the event loop (FA-SEC-02).
 
 /**
- * SmartConnect Collab must exist before the account transaction joins it. It
- * is normally created at server start (reconcileSharedWorkspace); on a fresh
- * database this creates it on demand (idempotent, advisory-locked). A failure
- * here never blocks the sign-up — joinSharedWorkspace then logs the problem.
+ * Inside the account transaction: membership (MEMBER) of the EXISTING
+ * SmartConnect Collab and its existing default channels — the same channels
+ * every activated or provisioned account gets (lib/sharedWorkspace) — and
+ * Collab as the landing workspace. Upserts / skipDuplicates: never a second
+ * membership. Creates no workspace and no channel; a missing Collab throws
+ * (503), which rolls the whole account back.
  */
-const ensureSharedWorkspaceExists = async () => {
-  const found = await prisma.workspace.findUnique({ where: { slug: SHARED_WORKSPACE_SLUG }, select: { id: true } });
-  if (found) return;
-  await ensureSharedWorkspace().catch((err: unknown) => {
-    console.error('Could not create SmartConnect Collab during sign-up:', err instanceof Error ? err.message : 'unknown error');
-  });
-};
-
-/**
- * Inside the account transaction: SmartConnect Collab membership (MEMBER) and
- * its default channels — the same channels every activated or provisioned
- * account gets (lib/sharedWorkspace) — and Collab as the landing workspace.
- * Returns the workspace id, or null when it is missing (logged; the account
- * still exists and the startup reconcile gives it access later).
- */
-const joinSharedWorkspace = async (tx: Prisma.TransactionClient, userId: string): Promise<string | null> => {
-  const workspace = await tx.workspace.findUnique({ where: { slug: SHARED_WORKSPACE_SLUG }, select: { id: true } });
+const joinSharedWorkspace = async (tx: Prisma.TransactionClient, userId: string): Promise<string> => {
+  const workspace = await findSharedWorkspace(tx);
   if (!workspace) {
-    console.error(`No shared workspace (slug="${SHARED_WORKSPACE_SLUG}") found — SmartConnect Collab has not been created yet.`);
-    return null;
+    console.error(
+      `Sign-up refused: SmartConnect Collab (slug="${SHARED_WORKSPACE_SLUG}", isDefault=true) was not found. ` +
+        'The server creates it at startup (reconcileSharedWorkspace) — check the startup log for "SmartConnect Collab reconcile failed".'
+    );
+    throw new SharedWorkspaceMissingError();
   }
   await tx.workspaceMember.upsert({
     where: { userId_workspaceId: { userId, workspaceId: workspace.id } },
@@ -209,7 +202,7 @@ const joinSharedWorkspace = async (tx: Prisma.TransactionClient, userId: string)
     select: { id: true },
   });
   if (channels.length === 0) {
-    // Not auto-created here: that's the shared-workspace reconcile's job, not a new account's.
+    // Not created here: that's the shared-workspace reconcile's job, not a new account's.
     console.error('SmartConnect Collab has none of its default channels — the workspace setup is incomplete.');
   }
   await tx.channelMember.createMany({
@@ -277,7 +270,6 @@ export const signup = async (body: SignupBody, meta: SessionMeta = {}) => {
   }
 
   const passwordHash = await bcrypt.hash(fields.password, 12);
-  await ensureSharedWorkspaceExists();
 
   const create = async (): Promise<CreatedAccount> => {
     for (let attempt = 0; ; attempt++) {
@@ -387,7 +379,6 @@ export const verifySignupOtp = async (email: unknown, code: unknown, meta: Sessi
     throw new HttpError(400, 'A user with this email or username already exists.');
   }
 
-  await ensureSharedWorkspaceExists();
   const created = await prisma.$transaction(async (tx) => {
     // Re-checked under the per-address lock shared with direct sign-up.
     await lockSignupEmail(tx, pending.email);

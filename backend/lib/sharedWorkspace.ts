@@ -122,9 +122,30 @@ export const ensureSharedWorkspace = async () =>
     return { workspaceId: workspace.id, channelIds };
   });
 
+type Db = Prisma.TransactionClient | typeof prisma;
+
+/**
+ * THE existing SmartConnect Collab workspace, by its configured reference
+ * (slug SHARED_WORKSPACE_SLUG and the isDefault flag — what the startup
+ * reconcile maintains and what listWorkspacesForUser shows everyone), or null.
+ * Read-only: callers that need it to exist (sign-up) treat null as a
+ * configuration error instead of creating another one.
+ */
+export const findSharedWorkspace = (db: Db = prisma) =>
+  db.workspace.findFirst({ where: { slug: SHARED_WORKSPACE_SLUG, isDefault: true }, select: { id: true, name: true } });
+
+/** Thrown when an operation needs SmartConnect Collab and the database has none (a setup problem, not a user error). */
+export class SharedWorkspaceMissingError extends Error {
+  readonly status = 503;
+  constructor() {
+    super('Sign-up is temporarily unavailable because the shared SmartConnect Collab workspace is not set up. Please contact your administrator.');
+    this.name = 'SharedWorkspaceMissingError';
+  }
+}
+
 const sharedWorkspaceTarget = async () => {
-  const workspace = await prisma.workspace.findUnique({ where: { slug: SHARED_WORKSPACE_SLUG }, select: { id: true, isDefault: true } });
-  if (!workspace?.isDefault) return null;
+  const workspace = await findSharedWorkspace();
+  if (!workspace) return null;
   const channels = await prisma.channel.findMany({
     where: {
       workspaceId: workspace.id,

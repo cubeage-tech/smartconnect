@@ -37,7 +37,7 @@ const setup = async () => {
 /** Registers through the real signup endpoint, exactly like a new user. */
 const register = async () => {
   const email = uniqueEmail();
-  const inviteToken = await invitationFor(email); // T.21: sign-up is invitation-only
+  const inviteToken = await invitationFor(email); // optional: sign-up is public; this also exercises the invitation path
   const res = await request(app).post('/api/auth/signup').send({ username: uniqueUsername(), email, password: 'Password123!', inviteToken });
   expect(res.status).toBe(201);
   return { user: res.body.user as { id: string; email: string }, token: res.body.token as string };

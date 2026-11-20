@@ -283,3 +283,67 @@ describe('public sign-up with an e-mail invitation link', () => {
     expect((await request(app).post('/api/auth/login').send({ email: `inv_${t}@example.com`, password: `pass-${t}` })).status).toBe(200);
   });
 });
+
+describe('public sign-up joins the EXISTING SmartConnect Collab (regression: new Members were offered "Create a workspace")', () => {
+  it('creates no workspace and no channel, and never a second membership', async () => {
+    const before = {
+      workspaces: await prisma.workspace.count(),
+      sharedWorkspaces: await prisma.workspace.count({ where: { isDefault: true } }),
+      collabChannels: await prisma.channel.count({ where: { workspaceId: collabId } }),
+    };
+    const res = await newSignup();
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe('USER');
+    expect(res.body.user.lastActiveWorkspaceId).toBe(collabId);
+    expect(await prisma.workspace.count()).toBe(before.workspaces);
+    expect(await prisma.workspace.count({ where: { isDefault: true } })).toBe(before.sharedWorkspaces);
+    expect(await prisma.channel.count({ where: { workspaceId: collabId } })).toBe(before.collabChannels);
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id } })).toBe(1);
+    expect(await prisma.channelMember.count({ where: { userId: res.body.user.id } })).toBe(SHARED_CHANNELS.length);
+
+    // Loading the workspace list (what the web app does next) adds nothing either, and lists Collab.
+    const listed = await request(app).get('/api/workspaces').set(authHeader(res.body.token));
+    expect(listed.body).toEqual([expect.objectContaining({ id: collabId, isDefault: true, myRole: 'MEMBER' })]);
+    expect(await prisma.workspaceMember.count({ where: { userId: res.body.user.id } })).toBe(1);
+    expect(await prisma.channelMember.count({ where: { userId: res.body.user.id } })).toBe(SHARED_CHANNELS.length);
+  });
+
+  it('a missing SmartConnect Collab is a configuration error: 503, no account and nothing created, on both sign-up paths', async () => {
+    const email = uniqueEmail();
+    const otpEmail = uniqueEmail();
+    const workspacesBefore = await prisma.workspace.count();
+    expect((await signup({ username: uniqueUsername(), email: otpEmail, password: PASSWORD }, '/api/auth/signup-request')).status).toBe(200);
+    const code = vi.mocked(sendOtpEmail).mock.calls[0][1];
+    // Test database only: hide Collab by clearing its flag; always restored below.
+    await prisma.workspace.update({ where: { id: collabId }, data: { isDefault: false } });
+    try {
+      const res = await newSignup({ email });
+      expect(res.status).toBe(503);
+      expect(res.body.error).toMatch(/SmartConnect Collab workspace is not set up/);
+      const verified = await signup({ email: otpEmail, code }, '/api/auth/verify-otp');
+      expect(verified.status).toBe(503);
+      expect(await prisma.user.count({ where: { email: { in: [email, otpEmail] } } })).toBe(0);
+      expect(await prisma.workspace.count()).toBe(workspacesBefore); // never "repaired" by creating another one
+      expect(await prisma.oTPVerification.count({ where: { email: otpEmail } })).toBe(1); // still completable later
+    } finally {
+      await prisma.workspace.update({ where: { id: collabId }, data: { isDefault: true } });
+    }
+    // Once Collab is back, the same people sign up normally and land in it.
+    const retried = await newSignup({ email });
+    expect(retried.status).toBe(201);
+    expect(retried.body.user.lastActiveWorkspaceId).toBe(collabId);
+    expect((await signup({ email: otpEmail, code }, '/api/auth/verify-otp')).status).toBe(201);
+  });
+
+  it('only Team Leads and Admins can create workspaces — a new Member cannot', async () => {
+    const member = await newSignup();
+    expect((await request(app).post('/api/workspaces').set(authHeader(member.body.token)).send({ name: 'Not allowed' })).status).toBe(403);
+    expect((await request(app).get('/api/me/hierarchy').set(authHeader(member.body.token))).body.canCreateWorkspaces).toBe(false);
+    const lead = await createTeamLead();
+    expect((await request(app).post('/api/workspaces').set(authHeader(lead.token)).send({ name: 'Lead project' })).status).toBe(201);
+    const admin = await createAndLoginUser({ role: 'ADMIN' });
+    const adminWs = await request(app).post('/api/workspaces').set(authHeader(admin.token)).send({ name: 'Admin project' });
+    expect(adminWs.status).toBe(201);
+    expect((await request(app).patch(`/api/workspaces/${adminWs.body.workspace.id}`).set(authHeader(admin.token)).send({ name: 'Admin project 2' })).status).toBe(200);
+  });
+});

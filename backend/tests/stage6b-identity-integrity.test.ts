@@ -16,7 +16,7 @@ vi.mock('../utils/mailer', () => ({
 
 /**
  * Stage 6B (entireanalysis.md T.26) — account identity integrity across every
- * account-creation path: public sign-up (invitation-only), admin "Create
+ * account-creation path: public sign-up (with or without an invitation), admin "Create
  * user", Company Admin → Team Lead and Team Lead → Member provisioning, and
  * activation. Invariant: one e-mail address (PostgreSQL lower()) identifies at
  * most one account. Disposable test database only.

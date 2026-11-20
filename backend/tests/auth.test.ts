@@ -23,7 +23,7 @@ describe('signup -> verify -> login -> me', () => {
     const email = uniqueEmail();
     const username = uniqueUsername();
     const password = 'Password123!';
-    const inviteToken = await invitationFor(email); // T.21: sign-up is invitation-only
+    const inviteToken = await invitationFor(email); // optional: sign-up is public; this also exercises the invitation path
 
     const signupRes = await request(app)
       .post('/api/auth/signup-request')
