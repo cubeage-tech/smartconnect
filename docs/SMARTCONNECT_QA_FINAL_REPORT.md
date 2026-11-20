@@ -1,6 +1,6 @@
 # SmartConnect — QA Remediation Final Report
 
-Date: 2026-11-20 · Branch `main` · Base commit `31af1f6` · **Nothing has been committed, pushed or deployed.** All changes are in the working tree.
+Date: 2026-11-20 · Branch `main` · Base commit `31af1f6`. The remediation was committed and pushed by the owner as `3f2b820`; the CI concurrency fix (§14) is **not committed**. Nothing has been deployed.
 
 Source: the QA report (https://claude.ai/artifact/AQBwpGdKq6tZeZMTmrQdvd), 72 findings. Each finding’s full record (reproduction, root cause, files, tests, verification) is in `docs/SMARTCONNECT_QA_REMEDIATION_TRACKER.md`; deployment steps and the test-data cleanup manifest are in `docs/SMARTCONNECT_PRODUCTION_READINESS.md`.
 
@@ -15,7 +15,7 @@ Source: the QA report (https://claude.ai/artifact/AQBwpGdKq6tZeZMTmrQdvd), 72 fi
 | **Unresolved** — Not changed: a product decision or the owner’s own production data | 2 | M15, L29 |
 | **Total** | **72** | |
 
-Tests: backend 697 passed · 0 failed · 21 skipped (718) — the 21 skips are the same as at the baseline · frontend 481 passed, 0 failed (77 files) · browser E2E 38 of 38 tests pass across 19 spec files (final run: 37 passed + 1 environment failure that passed on re-run) · type checks clean · production builds succeed. Details in §14–§18.
+Tests: backend 700 passed · 0 failed · 21 skipped (721) — the 21 skips are the same as at the baseline · frontend 481 passed, 0 failed (77 files) · browser E2E 38 of 38 tests pass across 19 spec files when re-run; the latest full run had 37 passed and 1 transient failure (`ECONNRESET`, cause undetermined) whose spec then passed 6 of 6 re-runs · type checks clean · production builds succeed. Details in §14–§18.
 
 ## 1. Total original issues
 
@@ -134,14 +134,15 @@ All 6 High findings are resolved. Of the 18 Medium findings, 15 are resolved, M4
 
 ## 8. Files modified
 
-105 files modified and 26 added (paths relative to the repository root).
+Since the base commit `31af1f6`: 106 files modified and 27 added (paths relative to the repository root).
 
-**Backend** (25)
+**Backend** (26)
 
 - `backend/config/env.ts`
 - `backend/lib/attachments.ts`
 - `backend/lib/cloudinary.ts`
 - `backend/lib/emailDelivery.ts`
+- `backend/lib/policy/context.ts`
 - `backend/lib/settings.ts` (new)
 - `backend/lib/systemAccounts.ts` (new)
 - `backend/modules/admin/admin.controller.ts`
@@ -159,12 +160,12 @@ All 6 High findings are resolved. Of the 18 Medium findings, 15 are resolved, M4
 - `backend/modules/users/users.controller.ts`
 - `backend/modules/users/users.routes.ts`
 - `backend/modules/users/users.service.ts`
-- `backend/prisma/migrations/20261120120000_qa_h4_profile_avatar/` (new)
+- `backend/prisma/migrations/20261120120000_qa_h4_profile_avatar/migration.sql` (new)
 - `backend/prisma/schema.prisma`
 - `backend/server.ts`
 - `backend/utils/mailer.ts`
 
-**Backend tests** (17)
+**Backend tests** (18)
 
 - `backend/tests/auth.test.ts`
 - `backend/tests/deployment-config.test.ts`
@@ -178,6 +179,7 @@ All 6 High findings are resolved. Of the 18 Medium findings, 15 are resolved, M4
 - `backend/tests/qa-unread-workspaces.test.ts` (new)
 - `backend/tests/read-state.test.ts`
 - `backend/tests/setup.ts`
+- `backend/tests/signup-concurrency-small-pool.test.ts` (new)
 - `backend/tests/stage2-team-leads.test.ts`
 - `backend/tests/stage4-company-overview.test.ts`
 - `backend/tests/t32-hardening.test.ts`
@@ -359,9 +361,29 @@ Vitest against a disposable local Postgres (never the hosted database).
 |---|---|---|
 | Baseline, commit `31af1f6` (clean worktree) | 63 passed · 2 failed · 1 skipped (66) | 666 passed · 7 failed · 21 skipped (694) |
 | After remediation, first full run | 66 passed · 3 failed · 1 skipped (70) | 689 passed · 8 failed · 21 skipped (718) |
-| **Final full run** | 69 passed · 1 skipped (70) | **697 passed · 0 failed · 21 skipped (718)** |
+| Final run before the CI fix (default pool) | 69 passed · 1 skipped (70) | 697 passed · 0 failed · 21 skipped (718) |
+| **Final full run, CI pool size (`connection_limit=5`), with the CI fix** | 70 passed · 1 skipped (71) | **700 passed · 0 failed · 21 skipped (721)** |
 
-The 7 baseline failures (`auth.test.ts`, `email-validation-dos.test.ts`) were test-order dependence, not product defects: they need the shared SmartConnect Collab workspace, which only server startup or another test file created, and one file deleted it afterwards. Both causes are fixed (the files create it in `beforeAll`, like the other sign-up tests; `p2-shared-workspace` restores it). The 8th failure in the first run was `deployment-config.test.ts` asserting the old behaviour that caused C2 (the reset mailer silently returning `undefined` with no e-mail service); it now asserts the truthful `{ sent: false, reason: "not_configured" }` and still asserts nothing is sent. 24 tests were added (C1 ×4, C2 ×8, H4 ×5, M9/M10/M11/L43 ×4, M12/L25 ×3); no existing test was removed or loosened.
+The 7 baseline failures (`auth.test.ts`, `email-validation-dos.test.ts`) were test-order dependence, not product defects: they need the shared SmartConnect Collab workspace, which only server startup or another test file created, and one file deleted it afterwards. Both causes are fixed (the files create it in `beforeAll`, like the other sign-up tests; `p2-shared-workspace` restores it). The 8th failure in the first run was `deployment-config.test.ts` asserting the old behaviour that caused C2 (the reset mailer silently returning `undefined` with no e-mail service); it now asserts the truthful `{ sent: false, reason: "not_configured" }` and still asserts nothing is sent. 27 tests were added (C1 ×4, C2 ×8, H4 ×5, M9/M10/M11/L43 ×4, M12/L25 ×3, concurrent sign-ups with a small pool ×3); no existing test was removed or loosened.
+
+### GitHub Actions: concurrent sign-up failures (fixed)
+
+The backend CI job failed on `main` at `16e1bee`, at `31af1f6` (before this remediation) and at `3f2b820` (this remediation, pushed), always on the same two tests, which passed on developer machines:
+
+| Test | CI result | Expected |
+|---|---|---|
+| `stage6a-auth1-signup` #8 — 5 direct sign-ups + 1 OTP verification for one invitation, exact and case variants | `[201, 400, 400, 400, 500, 500]` | `[201, 400, 400, 400, 400, 400]` |
+| `stage6c-identity-remediation` #8 — 5 sign-ups for one invitation, exact and case variants | `[500, 500, 500, 500, 503]` | `[201, 400, 400, 400, 400]` |
+
+**Root cause.** Sign-up serializes all attempts for one address (any letter case) on a transaction-scoped advisory lock (`pg_advisory_xact_lock`), and each waiting request holds a pooled database connection while it waits. Inside the winning transaction, `acceptInvitationForNewAccount` checked that the inviter still manages the workspace through `stillManages` → `loadWorkspaceActor` on the **global** Prisma client — a query needing a *second* pooled connection while the transaction held the lock. Prisma’s default pool is `2 × CPUs + 1` (5 on a 2-core CI runner, 17 on the 8-core development machine). With the pool full of requests waiting for the lock, the winner waited for a connection that could only free up once it finished: every interactive transaction hit its 5-second limit (Prisma P2028 “Transaction already closed” / “Unable to start a transaction in the given time” → 500), and the winner’s stranded query hit the pool timeout (P2024 → 503). Nothing was half-written: each transaction rolled back.
+
+**Reproduced locally** with the CI pool size (`connection_limit=5`): exactly `[201, 400, 400, 400, 500, 500]` (6A) and `[500, 500, 500, 500, 500]` (6C), with P2028 errors; the stack traces show the winner’s transaction expiring at the first query after the out-of-transaction check.
+
+**Fix.** The check runs on the transaction’s own connection: `loadWorkspaceActor` and `stillManages` accept a client, and `acceptInvitationForNewAccount` passes its `tx` (`lib/policy/context.ts`, `modules/invitations/invitations.service.ts`). A scan of every function that receives a transaction client found no other query escaping its transaction. Unchanged: the advisory lock, the case-insensitive unique index, the isolation level, the single conditional update that consumes an invitation, the error mapping and every test expectation.
+
+**Verification.** Both previously failing files plus the new regression file, 12 consecutive runs (8 at the CI pool size `connection_limit=5`, 4 at the default pool): **27/27 tests every run**. The new `tests/signup-concurrency-small-pool.test.ts` runs the race with a 3-connection pool — fewer connections than requests — in three shapes, each twice: five identical addresses; five case variants (lower, UPPER, Capitalised, upper-case domain, mixed) mixing the username and full-name sign-up forms; and direct sign-ups racing an OTP verification. It checks one 201, a controlled 400 with the duplicate-account message for every other request, one account in any letter case, no account for any losing request, the invitation accepted once, and exactly one membership in the invited workspace and in Collab. With the fix temporarily removed it fails with CI’s exact signature, `[500, 500, 500, 500, 503]`. The complete backend suite at the CI pool size: **700 passed, 0 failed, 21 skipped**.
+
+**The `database "test" does not exist` lines in the CI log** come from the Postgres service health check, `pg_isready -U test`: without `-d` it connects to a database named after the user (`test`), which does not exist (the tests use `slack_clone_test`). `pg_isready` still reports “accepting connections”, so the service is marked healthy and the tests are unaffected — log noise, not a cause of these failures. CI configuration was not changed; adding `-d slack_clone_test` to the health command would silence it.
 
 ## 15. Frontend test results
 
@@ -369,11 +391,12 @@ Vitest + Testing Library (jsdom): **481 passed, 0 failed (77 files)** (baseline 
 
 ## 16. Browser E2E results
 
-Playwright (Chromium), real API + Vite + local Postgres + local storage stand-in; no e-mail, no cloud credentials. **38 of 38 tests pass across 19 spec files (final run: 37 passed + 1 environment failure that passed on re-run)**.
+Playwright (Chromium), real API + Vite + local Postgres + local storage stand-in; no e-mail, no cloud credentials. **38 of 38 tests pass across 19 spec files when re-run; the latest full run had 37 passed and 1 transient failure (`ECONNRESET`, cause undetermined) whose spec then passed 6 of 6 re-runs**.
 
-- **First full run** (before the last fixes): 32 passed, 6 failed. Three failed in my new `signOut` helper (it looked for a button where the account menu has a `menuitem`); two specs still found the sign-up name field by the old placeholder that L4 replaced (they now use its label); and `p2-collaboration` exposed a real regression from the L3 fix — administrator-provisioned accounts sign in with an identifier that is not a full e-mail address, and the new check refused it (§19). After the fixes, all 9 tests in those 6 specs passed.
-- **Final full run** on a fresh database with the final code: **37 passed, 1 failed with `ENOSPC`** — the disk briefly filled while Playwright wrote that test’s trace, after all of its assertions had passed. Re-running its spec file (`t39-mobile`, 4 tests) on its own: **4/4 passed**.
-- Coverage: public sign-up and sign-in, SmartConnect Collab as the default workspace, Team Lead provisioning and single-use activation, invitations, cross-workspace isolation, chat, mentions, drafts, search, uploads (local storage stand-in), team tasks with per-member visibility, multi-tab sessions, admin login and theme, phone/tablet layouts at 11 viewports, the new QA checks (`qa-remediation`, 5 tests), and calls (`call-security`: signalling only between participants, spoofed rings rejected; `call-self-view`: self view alone and with the other person).
+- **First full run** (before the last remediation fixes): 32 passed, 6 failed. Three failed in my new `signOut` helper (it looked for a button where the account menu has a `menuitem`); two specs still found the sign-up name field by the old placeholder that L4 replaced (they now use its label); and `p2-collaboration` exposed a real regression from the L3 fix — administrator-provisioned accounts sign in with an identifier that is not a full e-mail address, and the new check refused it (§19). After the fixes, all 9 tests in those 6 specs passed.
+- **Second full run**: 37 passed, 1 failed with `ENOSPC` (the disk briefly filled while Playwright wrote a trace, after the test’s assertions had passed); its spec file re-run: 4/4 passed.
+- **Latest full run** (with the CI concurrency fix, fresh database): **37 passed, 1 failed.** `p2-collaboration` step 12 got `read ECONNRESET` on a plain API request expecting 403 (`GET /api/channels/:id/messages` as a non-member). **Re-runs of that spec: 6 of 6 passed** (3 right after, 3 during the pre-push check). **Cause not determined.** Ruled out: an application error (nothing logged; the endpoint and its middleware are untouched by any change since `3f2b820`); a crash or restart (the same API process served every later test); deliberate resets (the server closes connections only during shutdown, which did not happen); and reuse of an idle keep-alive connection — the failing request came 80 s after the previous one on the same request context, but a direct test (two requests on one Playwright request context 10 s, 66 s and 80 s apart against the API’s 65 s keep-alive) succeeded every time. In that run the whole spec was about 5× slower than on its own (a dialog took 6 s to close, typing a mention 11.6 s), pointing to load on the test machine, whose disk was 97% full. Recorded as an unexplained transient, not as a pass.
+- Coverage: public sign-up and sign-in, SmartConnect Collab as the default workspace, Team Lead provisioning and single-use activation, invitations, cross-workspace isolation, chat, mentions, drafts, search, uploads (local storage stand-in), team tasks with per-member visibility, multi-tab sessions, admin login and theme, phone/tablet layouts at 11 viewports, the QA checks (`qa-remediation`, 5 tests), and calls (`call-security`: signalling only between participants, spoofed rings rejected; `call-self-view`: self view alone and with the other person).
 
 ## 17. Type-check results
 
@@ -450,7 +473,7 @@ None. No frontend environment variable was added or renamed. The new `/admin/log
 
 ## 22. Required manual actions
 
-1. Review the working-tree changes, then commit and push (not done — not authorized).
+1. Review and commit the CI concurrency fix (`backend/lib/policy/context.ts`, `backend/modules/invitations/invitations.service.ts`, `backend/tests/signup-concurrency-small-pool.test.ts`) and these updated documents; the rest of the remediation is already in `3f2b820`. (Not committed here — not authorized.)
 2. On Render: correct the Cloudinary values and set the Brevo values (§20); deploy the backend. The build runs `prisma generate` (install) and the start command already runs `prisma migrate deploy`, which applies the one additive migration.
 3. Deploy the frontend on Vercel (no settings change).
 4. Run the post-deploy checks in `docs/SMARTCONNECT_PRODUCTION_READINESS.md` (upload, forgot-password, admin login, photo, unread dot, calls).
@@ -467,4 +490,5 @@ None. No frontend environment variable was added or renamed. The new `/admin/log
 - **Behaviour changes users will notice:** the sidebar sign-out icon moved into the account menu (M17); the admin sign-in form refuses non-admin accounts (L39); toasts appear top-right (M3); a new person’s first Home visit says “Welcome” (L16); people appear under their display name with two-letter initials and one colour everywhere (H4, L8, L9).
 - **Residual enumeration signal** on the first failed reset send per failure window (§12).
 - **Not verified against production**: production was not re-tested after the changes because nothing is deployed; the post-deploy checklist covers it.
+- **CI not yet re-run with the concurrency fix**: nothing was pushed. Local runs at the CI pool size pass (§14); the next push will show it on GitHub Actions.
 

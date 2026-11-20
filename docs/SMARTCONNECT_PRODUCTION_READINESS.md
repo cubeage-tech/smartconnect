@@ -1,6 +1,6 @@
 # SmartConnect — Production Readiness
 
-Date: 2026-11-20 · Base commit `31af1f6` on `main` · Changes are in the working tree: **not committed, pushed or deployed.**
+Date: 2026-11-20 · Base commit `31af1f6` on `main`. The remediation is committed and pushed as `3f2b820`; the CI concurrency fix on top of it is **not committed**. **Nothing is deployed.**
 
 Companion documents: `docs/SMARTCONNECT_QA_FINAL_REPORT.md` (results, root causes, tests) and `docs/SMARTCONNECT_QA_REMEDIATION_TRACKER.md` (all 72 findings).
 
@@ -17,8 +17,8 @@ Two production features stay off after deploy until Render is given valid creden
 
 ## 1. Before deploying
 
-- [ ] Review the diff: 105 modified and 26 new files, listed in the final report §8.
-- [ ] Commit to a branch and open a pull request. Nothing has been committed.
+- [ ] Commit the CI concurrency fix (`backend/lib/policy/context.ts`, `backend/modules/invitations/invitations.service.ts`, new `backend/tests/signup-concurrency-small-pool.test.ts`) and the updated documents. The rest of the remediation is already in `3f2b820`.
+- [ ] Confirm the GitHub Actions backend job is green on that commit. `3f2b820` itself failed CI on two concurrent sign-up tests, and this fix addresses them (final report §14).
 - [ ] Render → API service → Environment:
   - [ ] Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` to the three values of one Cloudinary account (Cloudinary console → Dashboard → API Keys). Production currently rejects the values it has.
   - [ ] Set `BREVO_API_KEY` to a Brevo **API v3** key, not an SMTP key.

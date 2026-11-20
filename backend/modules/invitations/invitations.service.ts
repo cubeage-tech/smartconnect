@@ -40,9 +40,12 @@ const assertCanManageInvitations = async (userId: string, workspaceId: unknown) 
   return actor;
 };
 
-/** Is `userId` (still) allowed to manage invitations for `workspaceId`? */
-const stillManages = async (userId: string, workspaceId: string) =>
-  canWorkspace(await loadWorkspaceActor(userId, workspaceId), 'workspace.manageInvitations');
+/**
+ * Is `userId` (still) allowed to manage invitations for `workspaceId`? Inside
+ * a transaction, pass its client (`db`): see acceptInvitationForNewAccount.
+ */
+const stillManages = async (userId: string, workspaceId: string, db: Prisma.TransactionClient | typeof prisma = prisma) =>
+  canWorkspace(await loadWorkspaceActor(userId, workspaceId, db), 'workspace.manageInvitations');
 
 // Stage 6C (IDN-3): exact and case-insensitive; "_", "%" and "\" are ordinary characters.
 const findUserByEmail = async (email: string) => {
@@ -439,7 +442,12 @@ export const acceptInvitationForNewAccount = async (
   const invitation = await tx.invitation.findUnique({ where: { token } });
   if (!invitation || invitationState(invitation) !== 'pending') return null;
   if (!(await isSameEmail(tx, invitation.email, account.email))) return null;
-  if (!(await stillManages(invitation.inviterId, invitation.workspaceId))) return null;
+  // CI fix (stage 6A/6C #8): on the transaction's own connection. On the global
+  // client this needed a second pooled connection while the sign-up held the
+  // per-address lock; concurrent sign-ups for the address held the rest of the
+  // pool waiting for that lock, so with a small pool (CI: 5) every transaction
+  // expired — 500/503 for all instead of one 201 and controlled 400s.
+  if (!(await stillManages(invitation.inviterId, invitation.workspaceId, tx))) return null;
   // The single-use lock, as in acceptInvitation.
   const flipped = await tx.invitation.updateMany({ where: { id: invitation.id, status: 'pending' }, data: { status: 'accepted' } });
   if (flipped.count === 0) return null;

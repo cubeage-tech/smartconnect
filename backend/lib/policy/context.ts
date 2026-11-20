@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { HttpError } from '../httpError';
 import { isUuid } from '../messageInput';
 import { prisma } from '../prisma';
@@ -75,8 +76,17 @@ export const loadOrganizationActor = async (userId: string, organizationId: stri
   };
 };
 
-export const loadWorkspaceActor = async (userId: string, workspaceId: string): Promise<WorkspaceActor> => {
-  const workspace = await prisma.workspace.findUnique({
+/**
+ * `db`: pass the caller's transaction client when this runs inside a
+ * transaction — a query on the global client there needs a second pooled
+ * connection while the transaction holds one (and any locks it took).
+ */
+export const loadWorkspaceActor = async (
+  userId: string,
+  workspaceId: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<WorkspaceActor> => {
+  const workspace = await db.workspace.findUnique({
     where: { id: workspaceId },
     select: {
       ownerId: true,
