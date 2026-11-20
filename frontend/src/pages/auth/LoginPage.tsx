@@ -120,6 +120,7 @@ export const LoginPage = () => {
   return (
     <AuthForm
       startOnSignup={location.pathname === '/signup'}
+      startInAdminMode={location.pathname === '/admin/login'}
       presetEmail={searchParams.get('email') ?? undefined}
     />
   );

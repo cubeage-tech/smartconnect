@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { errorMessage, workspacesApi } from '../../lib/api';
 import type { MemberCandidate } from '../../lib/api/workspaces';
 import { Button, EmptyState, Spinner, TextInput } from '../ui';
+import { Avatar } from '../ui/Avatar';
 import { Modal } from '../ui/Modal';
 
 /**
@@ -82,9 +83,8 @@ export const AddMembersModal = ({ workspaceId, workspaceName, onClose, onInvited
               const failed = status && status !== 'inviting' && status !== 'invited' && status !== 'pending' ? status : null;
               return (
                 <li key={c.id} className="flex items-center gap-3 px-3 py-2.5 bg-surface">
-                  <div className="w-9 h-9 rounded-lg bg-brand-muted text-brand font-bold flex items-center justify-center shrink-0" aria-hidden="true">
-                    {(c.displayName || c.username).charAt(0).toUpperCase()}
-                  </div>
+                  {/* QA L8 / L9: the shared avatar (initials and colour by person). */}
+                  <Avatar name={c.displayName || c.username} userId={c.id} size="md" />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-fg truncate">{c.displayName || c.username}</div>
                     <div className="text-xs text-fg-subtle truncate">@{c.username}</div>

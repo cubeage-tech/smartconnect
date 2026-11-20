@@ -294,7 +294,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           <div
             role="toolbar"
             aria-label="Formatting"
-            className={`flex items-center gap-0.5 overflow-x-auto no-scrollbar ${compact ? 'mb-1.5 pb-1.5' : 'mb-2 pb-2'} border-b border-line ${formattingHiddenOnPhone ? 'max-md:hidden' : ''}`}
+            // QA M13: the compact toolbar (thread replies, ~280px wide) wraps onto a
+            // second row instead of hiding buttons behind an unmarked sideways scroll.
+            className={`flex items-center gap-0.5 ${compact ? 'flex-wrap mb-1.5 pb-1.5' : 'overflow-x-auto no-scrollbar mb-2 pb-2'} border-b border-line ${formattingHiddenOnPhone ? 'max-md:hidden' : ''}`}
           >
             <ToolbarButton active={state.bold} onClick={() => chain().toggleBold().run()} label="Bold" shortcut="Ctrl+B"><Bold size={size} /></ToolbarButton>
             <ToolbarButton active={state.italic} onClick={() => chain().toggleItalic().run()} label="Italic" shortcut="Ctrl+I"><Italic size={size} /></ToolbarButton>

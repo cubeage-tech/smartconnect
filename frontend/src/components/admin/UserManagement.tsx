@@ -22,6 +22,7 @@ import { adminUsersApi, errorMessage } from '../../lib/api';
 import type { AccountStatus, AdminUser, AdminUserDetails } from '../../lib/api/adminUsers';
 import { Badge, Button, EmptyState, ErrorState, Field, LoadingState, Menu, Modal, TextInput, useConfirm } from '../ui';
 import type { MenuItem } from '../ui';
+import { Avatar } from '../ui/Avatar';
 
 /**
  * Platform user management (P2). Platform admins create accounts directly
@@ -46,7 +47,6 @@ const PASSWORD_MIN = 6;
 const USERNAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{1,38}[A-Za-z0-9]$/;
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-const initials = (u: { displayName: string | null; username: string }) => (u.displayName || u.username).trim().charAt(0).toUpperCase() || '?';
 
 const PasswordInput = ({ id, value, onChange, autoFocus }: { id?: string; value: string; onChange: (v: string) => void; autoFocus?: boolean }) => {
   const [visible, setVisible] = useState(false);
@@ -460,7 +460,8 @@ export const UserManagement = () => {
               return (
                 <li key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-surface-secondary transition-colors">
                   <div className="relative shrink-0">
-                    <div className="w-10 h-10 rounded-xl bg-brand-muted text-brand font-bold flex items-center justify-center" aria-hidden="true">{initials(u)}</div>
+                    {/* QA L8 / L9: the same initials and id-based colour as everywhere else. */}
+                    <Avatar name={u.displayName || u.username} userId={u.id} size="lg" />
                     <span className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-surface ${presence.dot}`} title={presence.label} />
                   </div>
                   <button type="button" onClick={() => setViewing(u.id)} className="min-w-0 flex-1 text-left rounded-lg">

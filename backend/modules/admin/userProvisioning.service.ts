@@ -1,3 +1,4 @@
+import { RESERVED_LOGINS } from '../../lib/systemAccounts';
 import bcrypt from 'bcryptjs';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import { logAuditEvent } from '../../lib/auditLog';
@@ -29,7 +30,6 @@ const DISPLAY_NAME_MAX = 80;
 const PAGE_DEFAULT = 50;
 const PAGE_MAX = 100;
 // Internal accounts that own platform resources or deleted users' content.
-const RESERVED_LOGINS = [SYSTEM_USER_EMAIL, 'deleted-user@system.internal'];
 const CREATABLE_STATUSES: UserStatus[] = ['ACTIVE', 'SUSPENDED'];
 
 // Explicit selection: password hashes are never read into a response.

@@ -327,14 +327,30 @@ html.theme-transition *::after {
   transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, fill 200ms ease !important;
 }
 
-/* Keyboard focus — visible on every interactive element, never on mouse click. */
-:where(a, button, [role="button"], [role="menuitem"], [role="tab"], [role="option"], input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+/* Keyboard focus — visible on every interactive element, never on mouse click.
+ * QA L11 / L20: in the base layer, so a component's own focus style
+ * (e.g. `outline-none` on the composer, whose container shows focus with
+ * focus-within, or on the search palette input) can override it. Unlayered,
+ * it beat every Tailwind utility and drew a second hard ring inside those. */
+@layer base {
+  :where(a, button, [role="button"], [role="menuitem"], [role="tab"], [role="option"], input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
 }
 
 /* ── P2: rich-text messages (composer and rendered messages share these) ── */
 .rich-text p { margin: 0; }
+/* QA M14: TipTap's Placeholder extension only marks the empty first paragraph
+ * (class is-editor-empty + data-placeholder); without this rule the composer
+ * hint ("Message #General (Type '/' for commands)") was never visible. */
+.rich-text p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-fg-subtle);
+}
 .rich-text p + p { margin-top: 0.25rem; }
 .rich-text h1 { font-size: 1.375rem; font-weight: 800; line-height: 1.3; margin: 0.25rem 0; }
 .rich-text h2 { font-size: 1.15rem; font-weight: 700; line-height: 1.35; margin: 0.25rem 0; }
@@ -557,10 +573,20 @@ html.dark ::placeholder { color: var(--color-fg-subtle); }
   }
 }
 
-/* Toasts (react-toastify) on the design tokens — theme-aware, quiet. */
-:root {
+/* Toasts (react-toastify) on the design tokens — theme-aware, quiet.
+ * QA L2: react-toastify v11 injects its own stylesheet at runtime, after this
+ * file, so its `:root { --toastify-color-light: #fff }` used to win and toasts
+ * stayed white in the dark theme. The tokens are declared on the container
+ * (.Toastify), which every toast inherits from, so they apply regardless of
+ * stylesheet order.
+ * QA M3: toasts sit top-right below the app header, never over the composer's
+ * Send button (bottom-right) or the header's account controls. */
+.Toastify {
+  --toastify-toast-top: calc(3.5rem + env(safe-area-inset-top, 0px));
   --toastify-color-light: var(--color-surface-raised);
   --toastify-text-color-light: var(--color-fg);
+  --toastify-color-dark: var(--color-surface-raised);
+  --toastify-text-color-dark: var(--color-fg);
   --toastify-color-success: var(--color-success);
   --toastify-color-error: var(--color-danger);
   --toastify-color-warning: var(--color-warning);
@@ -581,3 +607,10 @@ html.dark ::placeholder { color: var(--color-fg-subtle); }
   padding: 10px 12px;
 }
 .Toastify__close-button { color: var(--color-fg-subtle); opacity: 1; }
+
+/* QA L18: native checkboxes and radio buttons use the brand colour (both
+ * themes), not the browser's default blue. */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--color-brand);
+}

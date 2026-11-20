@@ -1,8 +1,9 @@
 import { randomUUID } from 'crypto';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../app';
 import { prisma } from '../lib/prisma';
+import { ensureSharedWorkspace } from '../lib/sharedWorkspace';
 import { createWorkspace, invitationFor, TestUser } from './collab-helpers';
 import { authHeader, createAndLoginUser, uniqueEmail, uniqueUsername } from './helpers';
 
@@ -18,6 +19,12 @@ import { authHeader, createAndLoginUser, uniqueEmail, uniqueUsername } from './h
  * ~14 minutes.
  */
 const ADVERSARIAL = `a@${'.'.repeat(60_000)}@`;
+
+// Sign-up joins SmartConnect Collab, which the server creates at startup; this
+// file uses the app in-process, so create it here (independent of file order).
+beforeAll(async () => {
+  await ensureSharedWorkspace();
+});
 const PASSWORD = 'Password123!';
 const FAST_MS = 250; // the fixed path answers in a few milliseconds
 const INVALID = { error: 'Invalid email format' };

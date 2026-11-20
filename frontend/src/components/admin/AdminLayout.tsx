@@ -143,14 +143,17 @@ export const AdminLayout = () => {
             <LogOut size={14} aria-hidden="true" /> <span className="max-[359px]:hidden">Sign out</span>
           </button>
         </div>
-        <nav aria-label="Administration" className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2">
+        {/* QA L45: the row fades at the right edge so it reads as scrollable (it
+            was cut mid-word, "Team Managemen", with no hint). */}
+        <nav aria-label="Administration" className="no-scrollbar flex gap-1 overflow-x-auto px-2 pb-2 pr-8 [mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]">
           {allItems.map((item) => (
             <button
               key={item.id}
               type="button"
               onClick={() => setActiveTab(item.id)}
               aria-current={activeTab === item.id ? 'page' : undefined}
-              className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs ${activeTab === item.id ? 'bg-brand-soft font-medium text-brand' : 'text-fg-muted hover:bg-surface-tertiary'}`}
+              // QA L26: 44px tall touch targets on the phone tab row.
+              className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs ${activeTab === item.id ? 'bg-brand-soft font-medium text-brand' : 'text-fg-muted hover:bg-surface-tertiary'}`}
             >
               <item.icon size={13} aria-hidden="true" /> {item.label}
             </button>

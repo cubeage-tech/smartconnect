@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { EmptyState } from '../../components/ui';
 import { Avatar } from '../../components/ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
+import { nameIn, usePeopleDirectory } from '../../lib/people';
 import type { Channel } from '../../types';
 import { useWorkspace } from './WorkspaceContext';
 import { useWorkspaces } from './WorkspacesProvider';
@@ -25,6 +26,7 @@ export const ChatsPage = () => {
   const { workspaceId, channels, dms, unreadCounts, onlineUsers, channelsLoading, dmsLoading } = useWorkspace();
   const workspace = useWorkspaces().getWorkspace(workspaceId);
   const { user } = useAuth();
+  const directory = usePeopleDirectory();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
 
@@ -37,6 +39,8 @@ export const ChatsPage = () => {
   const open = (c: Channel) => navigate(`/${workspaceId}/c/${c.id}`);
   const loading = (channelsLoading && channels.length === 0) || (dmsLoading && dms.length === 0);
 
+  // QA H4 / L9: a one-to-one conversation shows the other person's display name.
+  const titleOf = (c: Channel) => (c.isDM && !c.isGroupDM ? nameIn(directory, { id: c.otherUserId, username: c.name }, c.name) : c.name);
   const row = (c: Channel, leading: React.ReactNode, sub?: string) => {
     const unread = unreadCounts[c.id] ?? 0;
     return (
@@ -45,11 +49,11 @@ export const ChatsPage = () => {
           type="button"
           onClick={() => open(c)}
           className="flex min-h-14 w-full select-none items-center gap-3 px-4 py-2 text-left transition-colors active:bg-surface-secondary"
-          aria-label={`${c.isDM ? '' : '#'}${c.name}${unread > 0 ? `, ${unread} unread` : ''}${sub ? `, ${sub}` : ''}`}
+          aria-label={`${c.isDM ? '' : '#'}${titleOf(c)}${unread > 0 ? `, ${unread} unread` : ''}${sub ? `, ${sub}` : ''}`}
         >
           {leading}
           <span className="min-w-0 flex-1">
-            <span className={`block truncate text-[15px] ${unread > 0 ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{c.name}</span>
+            <span className={`block truncate text-[15px] ${unread > 0 ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>{titleOf(c)}</span>
             {sub && <span className="block truncate text-xs text-fg-subtle">{sub}</span>}
           </span>
           {unread > 0 && (
@@ -138,7 +142,7 @@ export const ChatsPage = () => {
                     }
                     const online = onlineUsers.find((u) => u.id === dm.otherUserId) as { status?: string } | undefined;
                     const presence = busy(online?.status) ? 'In a meeting' : online ? 'Online' : 'Offline';
-                    return row(dm, <Avatar name={dm.name} size="lg" presence={online ? 'online' : 'offline'} />, presence);
+                    return row(dm, <Avatar name={titleOf(dm)} userId={dm.otherUserId} size="lg" presence={online ? 'online' : 'offline'} />, presence);
                   })}
                 </ul>
               </section>

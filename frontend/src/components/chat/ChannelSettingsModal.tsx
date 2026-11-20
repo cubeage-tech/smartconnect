@@ -1,9 +1,10 @@
 import axios from 'axios';
-import { Archive, ArchiveRestore, Crown, Hash, Lock, Megaphone, Search, Shield, UserMinus } from 'lucide-react';
+import { Archive, ArchiveRestore, Crown, Hash, Loader2, Lock, Megaphone, Search, Shield, UserMinus } from 'lucide-react';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import { ROLE_LABELS } from '../../lib/channels';
 import type { ChannelDetails, ChannelMemberInfo, ChannelRole, ChannelVisibility } from '../../types';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Modal } from '../ui/Modal';
 
 interface ChannelSettingsModalProps {
@@ -31,6 +32,12 @@ export const ChannelSettingsModal = ({ details, currentUserId, onClose, onChange
   const [visibility, setVisibility] = useState<ChannelVisibility>(details.visibility);
   const [isAnnouncement, setIsAnnouncement] = useState(details.isAnnouncement);
   const [saving, setSaving] = useState(false);
+  // QA L36: confirmations use the app's dialog (not window.confirm), and
+  // QA L37: archiving shows that it is working.
+  const [confirming, setConfirming] = useState<
+    { kind: 'archive' } | { kind: 'owner'; member: ChannelMemberInfo } | { kind: 'remove'; member: ChannelMemberInfo } | null
+  >(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [members, setMembers] = useState<ChannelMemberInfo[] | null>(null);
 
@@ -73,20 +80,27 @@ export const ChannelSettingsModal = ({ details, currentUserId, onClose, onChange
     }
   };
 
-  const toggleArchive = async () => {
-    const archiving = !details.archived;
-    if (archiving && !window.confirm(`Archive #${details.name}? It becomes read-only and leaves channel discovery. Nothing is deleted.`)) return;
+  const setArchived = async (archiving: boolean) => {
+    setConfirming(null);
+    setArchiveBusy(true);
     try {
       const res = await axios.post<ChannelDetails>(`/api/channels/${details.id}/${archiving ? 'archive' : 'restore'}`);
       onChanged(res.data);
       toast.success(archiving ? 'Channel archived.' : 'Channel restored.');
     } catch (err) {
       toast.error(errorMessage(err, 'Could not change the archive state.'));
+    } finally {
+      setArchiveBusy(false);
     }
   };
+  const toggleArchive = () => (details.archived ? void setArchived(false) : setConfirming({ kind: 'archive' }));
 
-  const changeRole = async (member: ChannelMemberInfo, role: ChannelRole) => {
-    if (role === 'admin' && !window.confirm(`Make ${member.user.username} the channel owner? Current owners become moderators.`)) return;
+  const changeRole = async (member: ChannelMemberInfo, role: ChannelRole, confirmed = false) => {
+    if (role === 'admin' && !confirmed) {
+      setConfirming({ kind: 'owner', member });
+      return;
+    }
+    setConfirming(null);
     try {
       await axios.patch(`/api/channels/${details.id}/members/${member.userId}`, { role });
       await loadMembers();
@@ -97,8 +111,12 @@ export const ChannelSettingsModal = ({ details, currentUserId, onClose, onChange
     }
   };
 
-  const remove = async (member: ChannelMemberInfo) => {
-    if (!window.confirm(`Remove ${member.user.username} from #${details.name}?`)) return;
+  const remove = async (member: ChannelMemberInfo, confirmed = false) => {
+    if (!confirmed) {
+      setConfirming({ kind: 'remove', member });
+      return;
+    }
+    setConfirming(null);
     try {
       await axios.delete(`/api/channels/${details.id}/members/${member.userId}`);
       await loadMembers();
@@ -160,9 +178,15 @@ export const ChannelSettingsModal = ({ details, currentUserId, onClose, onChange
 
           <div className="flex items-center justify-between gap-3 pt-2">
             {caps.canArchive ? (
-              <button type="button" onClick={toggleArchive} className="flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-red-600">
-                {details.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
-                {details.archived ? 'Restore channel' : 'Archive channel'}
+              <button
+                type="button"
+                onClick={toggleArchive}
+                disabled={archiveBusy}
+                // QA L37: red only for Archive; Restore is a safe action.
+                className={`flex items-center gap-2 text-sm font-semibold text-gray-600 disabled:opacity-60 ${details.archived ? 'hover:text-brand' : 'hover:text-red-600'}`}
+              >
+                {archiveBusy ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : details.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+                {archiveBusy ? (details.archived ? 'Restoring…' : 'Archiving…') : details.archived ? 'Restore channel' : 'Archive channel'}
               </button>
             ) : (
               <span />
@@ -228,6 +252,35 @@ export const ChannelSettingsModal = ({ details, currentUserId, onClose, onChange
             </ul>
           )}
         </div>
+      )}
+      {confirming?.kind === 'archive' && (
+        <ConfirmDialog
+          title={`Archive #${details.name}?`}
+          message="It becomes read-only and leaves channel discovery. Nothing is deleted, and it can be restored."
+          confirmLabel="Archive channel"
+          tone="danger"
+          onConfirm={() => setArchived(true)}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming?.kind === 'owner' && (
+        <ConfirmDialog
+          title={`Make ${confirming.member.user.username} the channel owner?`}
+          message="Current owners become moderators."
+          confirmLabel="Make owner"
+          onConfirm={() => changeRole(confirming.member, 'admin', true)}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming?.kind === 'remove' && (
+        <ConfirmDialog
+          title={`Remove ${confirming.member.user.username} from #${details.name}?`}
+          message="They lose access to this channel. They can be added again later."
+          confirmLabel="Remove"
+          tone="danger"
+          onConfirm={() => remove(confirming.member, true)}
+          onCancel={() => setConfirming(null)}
+        />
       )}
     </Modal>
   );

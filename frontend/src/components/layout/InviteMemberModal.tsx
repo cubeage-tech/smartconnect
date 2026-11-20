@@ -5,6 +5,7 @@ import { formatDate } from '../../lib/adminAccess';
 import { errorMessage, invitationsApi } from '../../lib/api';
 import { Button, Field, Modal, Spinner, TextInput } from '../ui';
 import { InvitationLinkNotice } from '../workspaceAdmin/InvitationLinkNotice';
+import { getWorkspaceSettings } from '../../lib/api/workspaces';
 
 interface InviteMemberModalProps {
   isOpen: boolean;
@@ -28,6 +29,19 @@ export const InviteMemberModal = ({ isOpen, onClose, workspaceId }: InviteMember
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // QA L38: whether this server can e-mail the invitation at all (else the
+  // button says what it really does: create a link to share).
+  const [emailAvailable, setEmailAvailable] = useState(true);
+  useEffect(() => {
+    if (!isOpen) return;
+    let alive = true;
+    getWorkspaceSettings(workspaceId)
+      .then((s) => alive && setEmailAvailable(s.emailInvitationsAvailable ?? true))
+      .catch((err) => console.warn('Could not check e-mail availability:', err));
+    return () => {
+      alive = false;
+    };
+  }, [isOpen, workspaceId]);
   // The last invitation's own link, shown once to share (e.g. when no e-mail went out).
   const [lastInvite, setLastInvite] = useState<{ email: string; link: string; existingAccount: boolean } | null>(null);
 
@@ -92,12 +106,20 @@ export const InviteMemberModal = ({ isOpen, onClose, workspaceId }: InviteMember
     <Modal title="Invite people" subtitle="Grow your workspace" onClose={onClose} footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
       <div className="space-y-6">
         <form onSubmit={sendInvite} noValidate className="space-y-2">
-          <Field label="Invite by e-mail" error={emailError} hint="They join as a member. The invitation works only for this address and expires in 14 days.">
+          <Field
+            label="Invite by e-mail"
+            error={emailError}
+            hint={
+              emailAvailable
+                ? 'They join as a member. The invitation works only for this address and expires in 14 days.'
+                : 'E-mail isn’t set up on this server: you get a link to send them yourself. It works only for this address and expires in 14 days.'
+            }
+          >
             <TextInput type="email" autoComplete="off" placeholder="name@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <div className="flex justify-end">
             <Button type="submit" size="sm" loading={sending} disabled={!email.trim()} icon={<Send size={13} aria-hidden="true" />}>
-              Send invite
+              {emailAvailable ? 'Send invite' : 'Create invitation'}
             </Button>
           </div>
           {lastInvite && <InvitationLinkNotice email={lastInvite.email} link={lastInvite.link} existingAccount={lastInvite.existingAccount} />}

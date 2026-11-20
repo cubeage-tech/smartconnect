@@ -58,6 +58,8 @@ export const router = createBrowserRouter([
   // Same component as /login — AuthForm just defaults to its Sign Up tab
   // (see LoginPage.tsx's startOnSignup prop).
   { path: '/signup', element: <LoginPage /> },
+  // QA L5: the Administrator console sign-in has its own address.
+  { path: '/admin/login', element: <LoginPage /> },
   { path: '/reset-password', element: <ResetPassword /> },
   // Stage 2 (T.20): one-time account activation (token in the URL fragment).
   // Public: it creates no session — people sign in normally afterwards.

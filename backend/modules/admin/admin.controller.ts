@@ -41,7 +41,9 @@ export const exportChannelsHandler = async (_req: AuthenticatedRequest, res: Res
 export const auditLogsHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
-    const page = await adminService.getAuditLogs(cursor);
+    const action = typeof req.query.action === 'string' ? req.query.action : undefined;
+    const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+    const page = await adminService.getAuditLogs(cursor, { action, q });
     res.json(page);
   } catch (err) { next(err); }
 };

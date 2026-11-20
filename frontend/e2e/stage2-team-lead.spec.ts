@@ -215,7 +215,7 @@ test('public sign-up: anyone joins SmartConnect Collab as a Member; an e-mail in
     await expect(page.getByText('Create your account to join the workspace you were invited to.')).toBeVisible();
     const form = SIGNUP_FORM(page);
     await expect(form.locator('input[type="email"]')).toHaveValue(invitee.email);
-    await form.getByPlaceholder('Samarth Karale').fill(invitee.username);
+    await form.getByLabel('Full name').fill(invitee.username);
     await form.getByLabel('Password', { exact: true }).fill(invitee.password);
     await form.getByLabel('Confirm password').fill(invitee.password);
     await form.getByRole('button', { name: 'Create Account' }).click();

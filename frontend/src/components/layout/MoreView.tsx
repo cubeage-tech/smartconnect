@@ -1,7 +1,9 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Settings, Bell, Zap, LogOut, ChevronRight, Globe, Building2, FolderKanban, ListChecks } from 'lucide-react';
+import { Settings, Bell, MessageSquare, LogOut, ChevronRight, Globe, Building2, FolderKanban, ListChecks } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useWorkspace } from '../../pages/workspace/WorkspaceContext';
+import { useWorkspaces } from '../../pages/workspace/WorkspacesProvider';
 
 interface MoreViewProps {
   onViewChange: (view: any) => void;
@@ -11,26 +13,35 @@ interface MoreViewProps {
 
 export const MoreView = ({ onViewChange, header }: MoreViewProps) => {
   const { user, logout } = useAuth();
+  // QA L17: administration links only for people who can manage this workspace
+  // (a plain member reached a read-only settings page from here).
+  const { workspaceId } = useWorkspace();
+  const canManage = useWorkspaces().getWorkspace(workspaceId)?.capabilities?.canManage === true;
 
   const sections = [
     {
       title: 'Navigation',
       items: [
         { label: 'Activity', icon: Bell, action: () => onViewChange('activity') },
-        { label: 'Direct Messages', icon: Zap, action: () => onViewChange('dms') },
+        // QA L17: the same chat-bubble icon as Direct Messages in the sidebar.
+        { label: 'Direct Messages', icon: MessageSquare, action: () => onViewChange('dms') },
         { label: 'Directory', icon: Globe, action: () => onViewChange('directory') },
         { label: 'Projects', icon: FolderKanban, action: () => onViewChange('projects') },
         { label: 'My tasks', icon: ListChecks, action: () => onViewChange('tasks') },
       ]
     },
-    {
-      // F2: administration entry points (also in the workspace menu and rail).
-      title: 'Administration',
-      items: [
-        { label: 'Workspace settings', icon: Settings, action: () => onViewChange('settings') },
-        { label: 'Organizations', icon: Building2, action: () => onViewChange('organizations') },
-      ]
-    },
+    ...(canManage
+      ? [
+          {
+            // F2: administration entry points (also in the workspace menu and rail).
+            title: 'Administration',
+            items: [
+              { label: 'Workspace settings', icon: Settings, action: () => onViewChange('settings') },
+              { label: 'Organizations', icon: Building2, action: () => onViewChange('organizations') },
+            ],
+          },
+        ]
+      : []),
     // F1 removed the "Workspace Settings" (Preferences, Privacy & Permissions,
     // Connections) and "Support" (Help Center) items: they did nothing.
   ];

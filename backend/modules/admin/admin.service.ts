@@ -2,7 +2,9 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { Prisma, Role, UserStatus } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { realUsers } from '../../lib/systemAccounts';
 import { issuePasswordReset } from '../auth/auth.service';
+import { emailDeliveryConfigured } from '../../lib/emailDelivery';
 import { revokeAllSessions } from '../../lib/sessions';
 import { toCsv } from '../../utils/csv';
 import { logAuditEvent } from '../../lib/auditLog';
@@ -18,10 +20,11 @@ class HttpError extends Error {
 
 export const getAdminStats = async () => {
   const [totalUsers, totalChannels, totalMessages, users] = await Promise.all([
-    prisma.user.count(),
+    prisma.user.count({ where: realUsers }),
     prisma.channel.count(),
     prisma.message.count(),
     prisma.user.findMany({
+      where: realUsers,
       select: { id: true, username: true, email: true, role: true, status: true, createdAt: true },
     }),
   ]);
@@ -43,7 +46,8 @@ export const getAnalytics = async () => {
   const sevenDaysAgo = new Date(today.getTime() - 6 * DAY_MS);
 
   const [totalUsers, totalChannels, totalMessages, dailyRows, nonDmChannels] = await Promise.all([
-    prisma.user.count(),
+    // QA M9: people only — the same accounts User Management lists.
+    prisma.user.count({ where: realUsers }),
     prisma.channel.count({ where: { isDM: false } }),
     prisma.message.count(),
     // date_trunc groups messages by calendar day server-side — Prisma's
@@ -137,21 +141,42 @@ const AUDIT_LOG_PAGE_SIZE = 50;
 // id as a tiebreaker after createdAt since two log entries can land in the
 // same millisecond under a burst of admin actions, and take+1 avoids a
 // separate COUNT query just to report hasMore.
-export const getAuditLogs = async (cursor?: string) => {
+/**
+ * QA L43: optional filters (an action type, and text that matches the details
+ * or the actor), the list of action types for the filter, and — for entries
+ * about a user — that user's current username (`targetLabel`), so the log can
+ * show a name where older entries only stored an id. Entries themselves are
+ * never rewritten (an audit record stays as written).
+ */
+export const getAuditLogs = async (cursor?: string, filters: { action?: string; q?: string } = {}) => {
   const take = AUDIT_LOG_PAGE_SIZE;
+  const action = filters.action?.trim().slice(0, 64) || undefined;
+  const q = filters.q?.trim().slice(0, 100) || undefined;
+  const where: Prisma.AuditLogWhereInput = {
+    ...(action ? { action } : {}),
+    ...(q ? { OR: [{ details: { contains: q, mode: 'insensitive' } }, { actor: { username: { contains: q, mode: 'insensitive' } } }] } : {}),
+  };
 
-  const rows = await prisma.auditLog.findMany({
-    include: { actor: { select: { id: true, username: true } } },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    take: take + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  });
+  const [rows, actions] = await Promise.all([
+    prisma.auditLog.findMany({
+      where,
+      include: { actor: { select: { id: true, username: true } } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: take + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    }),
+    prisma.auditLog.findMany({ distinct: ['action'], select: { action: true }, orderBy: { action: 'asc' } }),
+  ]);
 
   const hasMore = rows.length > take;
-  const logs = rows.slice(0, take);
-  const nextCursor = hasMore ? logs[logs.length - 1].id : null;
+  const page = rows.slice(0, take);
+  const nextCursor = hasMore ? page[page.length - 1].id : null;
+  const userIds = [...new Set(page.filter((l) => l.targetType === 'USER' && l.targetId).map((l) => l.targetId!))];
+  const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, username: true } }) : [];
+  const names = new Map(users.map((u) => [u.id, u.username]));
+  const logs = page.map((l) => ({ ...l, targetLabel: l.targetType === 'USER' && l.targetId ? names.get(l.targetId) ?? null : null }));
 
-  return { logs, nextCursor, hasMore };
+  return { logs, nextCursor, hasMore, actions: actions.map((a) => a.action) };
 };
 
 const DELETED_USER_EMAIL = 'deleted-user@system.internal';
@@ -257,11 +282,24 @@ export const toggleUserRole = async (adminId: string, targetUserId: string) => {
 // request themselves via "Forgot password" — useful when a user is locked
 // out and can't reach that flow on their own. Reuses issuePasswordReset
 // (auth.service.ts) rather than duplicating the token/email logic.
+// QA C2: it said "sent" even when no e-mail service is configured. It now
+// says what happened, and points the admin at "Set password…" when no e-mail
+// can go out. "Accepted for delivery" is what Brevo's answer means.
+export const RESET_EMAIL_UNAVAILABLE =
+  'No reset e-mail can be sent: e-mail delivery isn’t configured on this server. Use “Set password…” to give the user a new password instead.';
 export const forceResetPassword = async (adminId: string, targetUserId: string) => {
   const target = await assertCanModerate(adminId, targetUserId, 'reset the password for');
-  await issuePasswordReset(target);
+  if (!emailDeliveryConfigured()) throw new HttpError(503, RESET_EMAIL_UNAVAILABLE);
+  let outcome: 'sent' | 'not_configured';
+  try {
+    outcome = await issuePasswordReset(target);
+  } catch (err) {
+    console.error('Admin password reset e-mail was not sent:', (err as Error)?.message ?? err);
+    throw new HttpError(502, 'The e-mail service did not accept the reset e-mail. Try again later, or use “Set password…” instead.');
+  }
+  if (outcome === 'not_configured') throw new HttpError(503, RESET_EMAIL_UNAVAILABLE);
   await logAuditEvent(adminId, 'FORCE_PASSWORD_RESET', 'USER', target.id, `Forced a password reset for "${target.username}"`);
-  return { message: `Password reset email sent to ${target.email}.` };
+  return { message: `Password reset e-mail accepted for delivery to ${target.email}.` };
 };
 
 export const deleteUser = async (adminId: string, targetUserId: string) => {

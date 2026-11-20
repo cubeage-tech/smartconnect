@@ -46,3 +46,34 @@ describe('sanitizeMessageHtml (rich text render guard)', () => {
     expect(host.querySelector('ul')?.hasAttribute('style')).toBe(false);
   });
 });
+
+describe('QA L10 — plain-text web addresses become safe links', () => {
+  it('links http(s) addresses in text, keeps trailing punctuation as text', () => {
+    const html = sanitizeMessageHtml('<p>see https://example.com/a?b=1, and http://x.io.</p>');
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    const links = [...div.querySelectorAll('a')];
+    expect(links.map((a) => a.getAttribute('href'))).toEqual(['https://example.com/a?b=1', 'http://x.io']);
+    for (const a of links) {
+      expect(a.getAttribute('target')).toBe('_blank');
+      expect(a.getAttribute('rel')).toBe('noopener noreferrer nofollow');
+    }
+    expect(div.textContent).toBe('see https://example.com/a?b=1, and http://x.io.');
+  });
+
+  it('never links inside existing links or code, and never non-web schemes', () => {
+    const div = document.createElement('div');
+    div.innerHTML = sanitizeMessageHtml('<p><a href="https://a.com">https://a.com</a> <code>https://b.com</code> javascript:alert(1) ftp://c.com</p>');
+    expect(div.querySelectorAll('a')).toHaveLength(1);
+    expect(div.querySelector('code a')).toBeNull();
+    expect(div.innerHTML).not.toMatch(/href="javascript|href="ftp/);
+  });
+
+  it('cannot be used to inject markup through a crafted address', () => {
+    const div = document.createElement('div');
+    div.innerHTML = sanitizeMessageHtml('<p>https://x.io/"onmouseover="alert(1) &lt;img src=x onerror=alert(2)&gt;</p>');
+    expect(div.querySelector('img')).toBeNull();
+    expect(div.querySelector('[onmouseover]')).toBeNull();
+    expect(div.querySelector('a')?.getAttribute('href')).toBe('https://x.io/');
+  });
+});

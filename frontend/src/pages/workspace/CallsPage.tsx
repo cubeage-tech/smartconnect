@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { EmptyState } from '../../components/ui';
 import { Avatar } from '../../components/ui/Avatar';
 import { useAuth } from '../../contexts/AuthContext';
+import { nameIn, usePeopleDirectory } from '../../lib/people';
 import type { Channel } from '../../types';
 import { useWorkspace } from './WorkspaceContext';
 
@@ -16,6 +17,7 @@ import { useWorkspace } from './WorkspaceContext';
 export const CallsPage = () => {
   const { channels, dms, onlineUsers, startCall } = useWorkspace();
   const { user } = useAuth();
+  const directory = usePeopleDirectory();
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
 
@@ -72,7 +74,7 @@ export const CallsPage = () => {
                   {people.map((dm) =>
                     dm.isGroupDM
                       ? row(dm, <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface-tertiary text-fg-muted" aria-hidden="true"><Users size={18} /></span>, dm.name, `${dm.participants?.length ?? 0} people`)
-                      : row(dm, <Avatar name={dm.name} size="lg" presence={onlineUsers.some((u) => u.id === dm.otherUserId) ? 'online' : 'offline'} />, dm.name, onlineUsers.some((u) => u.id === dm.otherUserId) ? 'Online' : 'Offline')
+                      : row(dm, <Avatar name={nameIn(directory, { id: dm.otherUserId, username: dm.name }, dm.name)} userId={dm.otherUserId} size="lg" presence={onlineUsers.some((u) => u.id === dm.otherUserId) ? 'online' : 'offline'} />, nameIn(directory, { id: dm.otherUserId, username: dm.name }, dm.name), onlineUsers.some((u) => u.id === dm.otherUserId) ? 'Online' : 'Offline')
                   )}
                 </ul>
               </section>

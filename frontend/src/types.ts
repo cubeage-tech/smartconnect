@@ -7,6 +7,11 @@ export interface User {
   // whenever they switch workspaces. Absent/null falls back to whichever
   // workspace is first in their /api/workspaces list.
   lastActiveWorkspaceId?: string | null;
+  // QA H4: from the people directory (GET /api/users) — the name to show
+  // (else the username), profile title, and photo id.
+  displayName?: string | null;
+  title?: string | null;
+  avatarId?: string | null;
 }
 
 export interface Workspace {
@@ -155,6 +160,9 @@ export interface MemberProfile extends WorkspaceMember {
 }
 
 export interface UserProfileSettings {
+  // QA H4: the name shown everywhere (empty = the username) and the photo id.
+  displayName: string | null;
+  avatarId: string | null;
   title: string | null;
   bio: string | null;
   timezone: string | null;

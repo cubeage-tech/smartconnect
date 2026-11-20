@@ -1,5 +1,6 @@
 import { X } from 'lucide-react';
 import { ReactNode, useEffect, useId, useRef } from 'react';
+import { Layer } from './Layer';
 
 interface ModalProps {
   title: string;
@@ -59,9 +60,11 @@ export const Modal = ({ title, subtitle, onClose, children, footer, size = 'md' 
   }, []);
 
   return (
+    <Layer>
     <div
       // T.39: on phones (< 640px) dialogs rise from the bottom edge as sheets; unchanged from 640px up.
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-overlay animate-fade-in sm:items-center sm:p-4"
+      // QA H1/M2/L23: rendered at the end of <body> (ui/Layer) above the app header.
+      className="fixed inset-0 z-[150] flex items-end justify-center bg-overlay animate-fade-in sm:items-center sm:p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -95,5 +98,6 @@ export const Modal = ({ title, subtitle, onClose, children, footer, size = 'md' 
         {footer && <div className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3.5">{footer}</div>}
       </div>
     </div>
+    </Layer>
   );
 };

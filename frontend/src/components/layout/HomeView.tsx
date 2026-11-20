@@ -1,3 +1,5 @@
+import { usePersonName } from '../../lib/people';
+import { useFirstVisit } from '../../lib/firstVisit';
 import { Activity, ArrowRight, Hash, Lock, MessageSquare, Users } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { Channel } from '../../types';
@@ -21,6 +23,8 @@ const greeting = () => {
  */
 export const HomeView = ({ channels, dms, onSelectChannel, onViewChange }: HomeViewProps) => {
   const { user } = useAuth();
+  const myName = usePersonName(user);
+  const firstVisit = useFirstVisit(user?.id);
   const myChannels = channels.filter((c) => !c.isDM);
 
   const cards = [
@@ -53,7 +57,8 @@ export const HomeView = ({ channels, dms, onSelectChannel, onViewChange }: HomeV
         <header className="mb-8 animate-fade-in">
           <p className="text-sm text-fg-subtle">{greeting()}</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-[-0.02em] text-fg md:text-[28px]">
-            Welcome back, {user?.username}
+            {/* QA L16: "Welcome" on your first visit, then "Welcome back"; your display name (QA H4). */}
+            {firstVisit ? 'Welcome' : 'Welcome back'}, {myName}
           </h1>
         </header>
 

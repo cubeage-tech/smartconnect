@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { HttpError } from '../../lib/httpError';
 import { isUuid } from '../../lib/messageInput';
 import { prisma } from '../../lib/prisma';
+import { INVITATION_TTL_MS } from '../../lib/policy/invitation';
 import { SYSTEM_USER_EMAIL } from '../../lib/sharedWorkspace';
 
 /**
@@ -38,6 +39,14 @@ const page = (query: Record<string, unknown>) => {
 };
 const now = () => new Date();
 const pendingWhere = () => ({ status: 'PENDING' as const, expiresAt: { gt: now() } });
+/**
+ * QA M11: workspace e-mail invitations (Settings › Invitations) that are still
+ * open — status "pending" and younger than their 14-day lifetime
+ * (lib/policy/invitation.ts). The overview used to count only account
+ * (Team Lead / new member) invitations, so a workspace with an open e-mail
+ * invitation showed "Pending 0".
+ */
+const openEmailInvitationWhere = () => ({ status: 'pending', createdAt: { gt: new Date(now().getTime() - INVITATION_TTL_MS) } });
 
 const PERSON = { id: true, username: true, email: true, status: true, role: true, createdAt: true, profile: { select: { displayName: true } }, accountTier: { select: { tier: true } } } as const;
 type PersonRow = Prisma.UserGetPayload<{ select: typeof PERSON }>;
@@ -54,7 +63,7 @@ const person = (p: PersonRow) => ({
 /** GET /api/company-overview/summary */
 export const companySummary = async () => {
   const at = now();
-  const [totalWorkspaces, activeWorkspaces, users, leads, invitations, expired] = await Promise.all([
+  const [totalWorkspaces, activeWorkspaces, users, leads, invitations, expired, emailPending] = await Promise.all([
     prisma.workspace.count(),
     prisma.workspace.count({ where: { members: { some: { user: { status: 'ACTIVE', ...notSystem } } } } }),
     // Team Members: ordinary accounts that are not Team Leads (no tier row, or MEMBER).
@@ -62,6 +71,7 @@ export const companySummary = async () => {
     prisma.accountTierGrant.count({ where: { tier: 'TEAM_LEAD', user: notSystem } }),
     prisma.accountInvitation.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.accountInvitation.count({ where: { status: 'PENDING', expiresAt: { lte: at } } }),
+    prisma.invitation.count({ where: openEmailInvitationWhere() }),
   ]);
   const [activeUsers, suspendedUsers] = await Promise.all([
     prisma.user.count({ where: { ...notSystem, status: 'ACTIVE' } }),
@@ -85,6 +95,8 @@ export const companySummary = async () => {
       expired,
       revoked: invites('REVOKED'),
     },
+    // QA M11: open workspace e-mail invitations, counted separately.
+    workspaceInvitations: { pending: emailPending },
   };
 };
 
@@ -124,12 +136,15 @@ export const listCompanyWorkspaces = async (query: Record<string, unknown>) => {
     take: SCAN_LIMIT,
   });
   const ids = rows.map((w) => w.id);
-  const [active, pending] = await Promise.all([
+  const [active, pending, emailPending] = await Promise.all([
     prisma.workspaceMember.groupBy({ by: ['workspaceId'], where: { workspaceId: { in: ids }, user: { status: 'ACTIVE', ...notSystem } }, _count: { _all: true } }),
     prisma.accountInvitation.groupBy({ by: ['workspaceId'], where: { workspaceId: { in: ids }, ...pendingWhere() }, _count: { _all: true } }),
+    prisma.invitation.groupBy({ by: ['workspaceId'], where: { workspaceId: { in: ids }, ...openEmailInvitationWhere() }, _count: { _all: true } }),
   ]);
   const activeBy = new Map(active.map((a) => [a.workspaceId, a._count._all]));
-  const pendingBy = new Map(pending.map((p) => [p.workspaceId, p._count._all]));
+  // QA M11: both kinds of open invitation count toward a workspace's "Pending".
+  const pendingBy = new Map<string, number>();
+  for (const p of [...pending, ...emailPending]) if (p.workspaceId) pendingBy.set(p.workspaceId, (pendingBy.get(p.workspaceId) ?? 0) + p._count._all);
 
   let items = rows.map((w) => {
     const owner = person(w.owner);

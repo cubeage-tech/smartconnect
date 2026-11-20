@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../utils/mailer', () => ({
   sendOtpEmail: vi.fn().mockResolvedValue(undefined),
-  sendResetPasswordEmail: vi.fn().mockResolvedValue(undefined),
+  sendResetPasswordEmail: vi.fn().mockResolvedValue({ sent: true }),
   sendInviteEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -16,7 +16,7 @@ import { isReactionEmoji } from '../modules/messages/messages.controller';
 import { resetSocketRateLimits, SOCKET_EVENT_LIMITS, takeSocketEventBudget } from '../sockets/rateLimit';
 import { sendResetPasswordEmail } from '../utils/mailer';
 import { createWorkspace, seedMessage, TestUser } from './collab-helpers';
-import { authHeader, createAndLoginUser, uniqueEmail } from './helpers';
+import { authHeader, createAndLoginUser, uniqueEmail, withFakeEmailSettings } from './helpers';
 import { emitAck, useSocketHarness } from './socket-harness';
 
 const harness = useSocketHarness();
@@ -32,8 +32,8 @@ afterEach(() => {
 describe('T.32 M1 — password reset hardening', () => {
   it('forgot-password answers identically whether or not the account exists', async () => {
     const { user } = await createAndLoginUser();
-    const known = await request(app).post('/api/auth/forgot-password').send({ email: user.email });
-    const unknown = await request(app).post('/api/auth/forgot-password').send({ email: uniqueEmail() });
+    const known = await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: user.email }));
+    const unknown = await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: uniqueEmail() }));
     expect(known.status).toBe(200);
     expect(unknown.status).toBe(200);
     expect(known.body).toEqual(unknown.body);
@@ -43,7 +43,7 @@ describe('T.32 M1 — password reset hardening', () => {
     process.env.NODE_ENV = 'development';
     let last = 0;
     for (let i = 0; i <= FORGOT_PASSWORD_LIMIT; i++) {
-      last = (await request(app).post('/api/auth/forgot-password').send({ email: uniqueEmail() })).status;
+      last = (await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: uniqueEmail() }))).status;
     }
     expect(last).toBe(429);
   });
@@ -57,7 +57,7 @@ describe('T.32 M1 — password reset hardening', () => {
     expect(unknown.body).toEqual(badToken.body);
 
     vi.mocked(sendResetPasswordEmail).mockClear();
-    await request(app).post('/api/auth/forgot-password').send({ email: user.email });
+    await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: user.email }));
     const link = new URL(vi.mocked(sendResetPasswordEmail).mock.calls[0][1] as string);
     const send = (newPassword: unknown) =>
       request(app).post('/api/auth/reset-password').send({ id: link.searchParams.get('id'), token: link.searchParams.get('token'), newPassword });

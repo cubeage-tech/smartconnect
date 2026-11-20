@@ -14,7 +14,9 @@ export const AttachmentTray = ({ items, onRemove, onRetry }: { items: UploadItem
       {items.map((item) => {
         const uploading = item.status === 'uploading' || item.status === 'queued';
         return (
-          <li key={item.id} className={`relative flex w-56 shrink-0 items-center gap-2.5 rounded-xl border bg-surface-secondary p-2 ${item.status === 'failed' ? 'border-danger/50' : 'border-line'}`}>
+          // QA L21: a failed upload's chip is wider and its reason wraps (up to
+          // three lines) instead of being cut to "File uploads …".
+          <li key={item.id} className={`relative flex shrink-0 gap-2.5 rounded-xl border bg-surface-secondary p-2 ${item.status === 'failed' ? 'w-72 items-start border-danger/50' : 'w-56 items-center border-line'}`}>
             {item.previewUrl ? (
               <img src={item.previewUrl} alt="" className="h-10 w-10 shrink-0 rounded-lg object-cover" />
             ) : (
@@ -25,9 +27,9 @@ export const AttachmentTray = ({ items, onRemove, onRetry }: { items: UploadItem
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-fg" title={item.file.name}>{item.file.name}</div>
               {item.status === 'failed' ? (
-                <div className="flex items-center gap-1 text-xs text-danger" role="alert">
-                  <AlertCircle size={12} aria-hidden="true" />
-                  <span className="truncate" title={item.error}>{item.error}</span>
+                <div className="flex items-start gap-1 text-xs text-danger" role="alert">
+                  <AlertCircle size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span className="line-clamp-4" title={item.error}>{item.error}</span>
                 </div>
               ) : uploading ? (
                 <div className="mt-1 flex items-center gap-1.5" aria-label={`Uploading ${item.file.name}, ${item.progress}%`}>

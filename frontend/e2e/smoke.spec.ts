@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { apiAs, createWorkspace, logIn, newUser, sendMessage, signUp, tokenOf, trackPageErrors, workspaceIdFrom } from './helpers';
+import { apiAs, createWorkspace, logIn, newUser, sendMessage, signUp, tokenOf, trackPageErrors, workspaceIdFrom, signOut } from './helpers';
 
 /**
  * F1 browser smoke tests against a real backend + scratch database.
@@ -20,7 +20,7 @@ test('sign up, create a workspace, post, sign out and log back in to the same wo
   await sendMessage(page, text);
   await expect(page.locator('main').getByText(text)).toBeVisible();
 
-  await page.getByTitle('Sign out').click();
+  await signOut(page);
   await page.waitForURL(/\/login/);
   await logIn(page, user);
   await page.waitForURL(new RegExp(`/${workspaceId}/c/[0-9a-f-]{36}$`));

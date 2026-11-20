@@ -8,12 +8,12 @@ import { ensureSharedWorkspace, reconcileSharedWorkspace, SHARED_CHANNELS } from
 
 vi.mock('../utils/mailer', () => ({
   sendOtpEmail: vi.fn().mockResolvedValue(undefined),
-  sendResetPasswordEmail: vi.fn().mockResolvedValue(undefined),
+  sendResetPasswordEmail: vi.fn().mockResolvedValue({ sent: true }),
   sendInviteEmail: vi.fn().mockResolvedValue(undefined),
 }));
 import { sendResetPasswordEmail } from '../utils/mailer';
 import { createWorkspace, TestUser } from './collab-helpers';
-import { authHeader, createAndLoginUser, createTeamLead } from './helpers';
+import { authHeader, createAndLoginUser, createTeamLead, withFakeEmailSettings } from './helpers';
 
 /**
  * Stage 2 (T.20) — Company Admin provisions Team Leads; each Team Lead
@@ -318,7 +318,7 @@ describe('Stage 2 finalization — suspended until activation (T.21)', () => {
     const admin = await createAndLoginUser({ role: 'ADMIN' });
     const lead = await provision(admin);
     vi.mocked(sendResetPasswordEmail).mockClear();
-    expect((await request(app).post('/api/auth/forgot-password').send({ email: lead.email })).status).toBe(200);
+    expect((await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: lead.email }))).status).toBe(200);
     expect(sendResetPasswordEmail).toHaveBeenCalledTimes(1);
     const link = new URL(vi.mocked(sendResetPasswordEmail).mock.calls[0][1] as string);
     const reset = await request(app)

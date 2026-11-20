@@ -76,6 +76,10 @@ describe('Stage 4 — Company Admin workspace overview', () => {
         expired: await prisma.accountInvitation.count({ where: { status: 'PENDING', expiresAt: { lte: now } } }),
         revoked: await prisma.accountInvitation.count({ where: { status: 'REVOKED' } }),
       },
+      // QA M11: open workspace e-mail invitations (status pending, under 14 days old).
+      workspaceInvitations: {
+        pending: await prisma.invitation.count({ where: { status: 'pending', createdAt: { gt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) } } }),
+      },
     });
     expect(res.body.totalTeamLeads).toBeGreaterThanOrEqual(1);
     expect(res.body.invitations.pending).toBeGreaterThanOrEqual(1);

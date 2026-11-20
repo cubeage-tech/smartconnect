@@ -218,7 +218,12 @@ export const CompanyOverview = () => {
         <Metric label="Active users" value={summary.totalActiveUsers} />
         <Metric label="Team Leads" value={summary.totalTeamLeads} />
         <Metric label="Team Members" value={summary.totalTeamMembers} hint={`${summary.activeMembers} active · ${summary.suspendedMembers} suspended`} />
-        <Metric label="Pending invitations" value={summary.invitations.pending} hint={`${summary.invitations.accepted} accepted · ${summary.invitations.expired} expired · ${summary.invitations.revoked} revoked`} />
+        {/* QA M11: account (Team Lead / new member) and workspace e-mail invitations together. */}
+        <Metric
+          label="Pending invitations"
+          value={summary.invitations.pending + (summary.workspaceInvitations?.pending ?? 0)}
+          hint={`${summary.invitations.pending} account · ${summary.workspaceInvitations?.pending ?? 0} e-mail · ${summary.invitations.accepted} accepted · ${summary.invitations.expired} expired · ${summary.invitations.revoked} revoked`}
+        />
         <Metric label="Suspended users" value={summary.suspendedUsers} />
       </section>
 

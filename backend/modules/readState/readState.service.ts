@@ -195,3 +195,25 @@ export const receiptRecipients = async (readerId: string, access: ChannelAccess,
 };
 
 export { HttpError };
+
+/**
+ * QA M12: unread messages per workspace, for every workspace the user belongs
+ * to — so the workspace rail can show that another workspace has something
+ * waiting (a DM, a channel message) before switching into it. Same counting
+ * and access rules as the per-workspace read state above (capped per channel).
+ */
+export const getUnreadByWorkspace = async (userId: string): Promise<{ workspaceId: string; unread: number }[]> => {
+  const rows = await prisma.$queryRaw<ReadState[]>(
+    readStateQuery(userId, Prisma.sql`c."workspaceId" IN (SELECT wm."workspaceId" FROM "WorkspaceMember" wm WHERE wm."userId" = ${userId})`)
+  );
+  const unread = rows.filter((r) => r.unreadCount > 0);
+  if (unread.length === 0) return [];
+  const channels = await prisma.channel.findMany({ where: { id: { in: unread.map((r) => r.channelId) } }, select: { id: true, workspaceId: true } });
+  const workspaceOf = new Map(channels.map((c) => [c.id, c.workspaceId]));
+  const totals = new Map<string, number>();
+  for (const r of unread) {
+    const ws = workspaceOf.get(r.channelId);
+    if (ws) totals.set(ws, (totals.get(ws) ?? 0) + r.unreadCount);
+  }
+  return [...totals].map(([workspaceId, count]) => ({ workspaceId, unread: count }));
+};

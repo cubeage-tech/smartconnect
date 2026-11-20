@@ -34,3 +34,14 @@ export const updateMyProfileHandler = async (req: AuthenticatedRequest, res: Res
     res.json(await usersService.updateProfile(req.user!.id, req.body));
   } catch (err) { next(err); }
 };
+
+// GET /api/users/:id/avatar — QA H4: a short-lived link to a person's photo,
+// for people who share a workspace with them. 404 for no photo or no access.
+export const getAvatarHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const link = await usersService.getAvatarLink(req.user!.id, req.params.id);
+    if (!link) return res.status(404).json({ error: 'No photo.' });
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json(link);
+  } catch (err) { next(err); }
+};

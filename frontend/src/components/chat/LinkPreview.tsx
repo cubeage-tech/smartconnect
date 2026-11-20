@@ -33,7 +33,15 @@ export const LinkPreview = ({ url }: { url: string }) => {
 
   if (loading) {
     return (
-      <div className="mt-2 w-full max-w-sm h-24 bg-gray-100 rounded-xl animate-pulse border border-gray-200"></div>
+      // QA L10: a recognisable placeholder card while the preview loads (it
+      // used to be a blank box).
+      <div role="status" aria-label="Loading link preview" className="mt-2 flex w-full max-w-lg overflow-hidden rounded-xl border border-line bg-surface">
+        <div className="skeleton h-20 w-20 shrink-0 sm:h-24 sm:w-32" />
+        <div className="flex-1 space-y-2 p-3">
+          <div className="skeleton h-3 w-2/3 rounded" />
+          <div className="skeleton h-3 w-1/3 rounded" />
+        </div>
+      </div>
     );
   }
 

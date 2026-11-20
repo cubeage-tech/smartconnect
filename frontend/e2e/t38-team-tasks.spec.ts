@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { acceptInvitationTo, apiAs, createWorkspace, logIn, newUser, pageToken, signUp, trackPageErrors } from './helpers';
+import { acceptInvitationTo, apiAs, createWorkspace, logIn, newUser, pageToken, signUp, trackPageErrors, signOut } from './helpers';
 
 /**
  * T.38 — Team Lead → member task assignment, in ONE browser profile with four
@@ -147,7 +147,7 @@ test('Team Lead assigns 5/3/2 tasks; each member sees only theirs; progress upda
     await expect(tabs.lead.getByRole('button', { name: new RegExp(`^${users.sahil.username}: 1 of 5 completed \\(20%\\)`) })).toBeVisible();
     // Sahil signs out and back in, in his own tab.
     await tabs.sahil.goto(`/${workspaceId}`);
-    await tabs.sahil.getByRole('button', { name: 'Sign out' }).first().click();
+    await signOut(tabs.sahil);
     await tabs.sahil.waitForURL(/\/login/);
     await logIn(tabs.sahil, users.sahil);
     await expect(panel(tabs.sahil)).toContainText(`This tab: ${users.sahil.username}`);

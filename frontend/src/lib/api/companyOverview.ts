@@ -15,6 +15,8 @@ export interface CompanySummary {
   suspendedMembers: number;
   suspendedUsers: number;
   invitations: { pending: number; accepted: number; expired: number; revoked: number };
+  /** QA M11: open workspace e-mail invitations (absent from older servers). */
+  workspaceInvitations?: { pending: number };
 }
 
 export interface OverviewPerson {

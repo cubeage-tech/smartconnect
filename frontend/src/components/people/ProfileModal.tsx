@@ -1,3 +1,5 @@
+import { displayNameOf } from '../../lib/people';
+import { Avatar } from '../ui/Avatar';
 import axios from 'axios';
 import { Clock, Hash, Loader2, MessageSquare, UserMinus } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -64,7 +66,7 @@ export const ProfileModal = ({ workspaceId, userId, currentUserId, canManage, vi
   const time = localTime(profile?.timezone ?? null);
 
   return (
-    <Modal title={profile?.username ?? 'Profile'} subtitle={profile?.title ?? undefined} onClose={onClose}>
+    <Modal title={profile ? displayNameOf(profile) : 'Profile'} subtitle={profile ? [profile.title, `@${profile.username}`].filter(Boolean).join(' · ') : undefined} onClose={onClose}>
       {!profile && !error && (
         <p className="py-8 flex justify-center text-gray-400" role="status">
           <Loader2 className="animate-spin" size={20} aria-label="Loading profile" />
@@ -78,9 +80,8 @@ export const ProfileModal = ({ workspaceId, userId, currentUserId, canManage, vi
       {profile && (
         <div className="space-y-5">
           <div className="flex items-center gap-4">
-            <span className="w-16 h-16 rounded-2xl bg-accent-600 text-white flex items-center justify-center text-2xl font-semibold uppercase">
-              {profile.username[0]}
-            </span>
+            {/* QA H4 / L9: the shared avatar (photo, or colour by person). */}
+            <Avatar name={displayNameOf(profile)} userId={profile.id} size="lg" />
             <div className="min-w-0">
               <p className="flex items-center gap-2 text-sm">
                 <span

@@ -48,10 +48,13 @@ import { AttachmentTray } from './upload/AttachmentTray';
 import { useUploadQueue } from './upload/useUploadQueue';
 import { Avatar } from '../ui/Avatar';
 import { BottomSheet, Menu, MenuItem, SheetAction, useConfirm } from '../ui';
-import { Camera, ChevronLeft, ImagePlus, Paperclip, PinOff, Type } from 'lucide-react';
+import { Camera, ChevronLeft, ImagePlus, Loader2, Paperclip, PinOff, Type } from 'lucide-react';
 import { COARSE_POINTER_QUERY, PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { useLongPress } from '../../hooks/useLongPress';
 import { EmojiPicker } from '../ui/EmojiPicker';
+import { ReactionPicker } from './ReactionPicker';
+import { toggleReactionLocally } from '../../lib/reactions';
+import { nameIn, usePeopleDirectory } from '../../lib/people';
 import { fetchMentionCandidates } from '../../lib/mentionCandidates';
 import { createTypingTracker } from '../../lib/typingTracker';
 import { Channel, ChannelDetails, Message, Receipt, User } from '../../types';
@@ -68,6 +71,12 @@ import { ThreadPanel } from './ThreadPanel';
 // page is prepended. Large enough that repeatedly paging backward through
 // thousands of messages never goes negative.
 const FIRST_ITEM_INDEX_START = 1_000_000;
+
+// QA L12: within this distance of the end the list counts as "at the end"
+// (stays pinned, no "Jump to latest"); a scroll within this long after the
+// reader's own wheel/touch/scrollbar/key input counts as theirs.
+const STICK_TO_BOTTOM_SLACK_PX = 24;
+const USER_SCROLL_WINDOW_MS = 1_000;
 
 interface Reaction { emoji: string; count: number; users: { id: string; username: string }[]; }
 // 👇 NAYA: Poll Interfaces 👇
@@ -143,12 +152,33 @@ const useDocumentVisible = () => {
   return visible;
 };
 
+/** QA H3: placeholder rows while a channel's history loads. */
+const MessageListSkeleton = () => (
+  <div role="status" aria-label="Loading messages" className="flex h-full flex-col justify-end gap-5 px-3 pb-4 @lg:px-2">
+    {[64, 82, 48, 72].map((width, i) => (
+      <div key={i} className="flex items-start gap-3">
+        <div className="skeleton h-9 w-9 shrink-0 rounded-lg" />
+        <div className="flex-1 space-y-2 pt-1">
+          <div className="skeleton h-3 w-32 rounded" />
+          <div className="skeleton h-3 rounded" style={{ width: `${width}%` }} />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: ChatAreaProps) => {
   const { user } = useAuth();
+  // QA H4: senders are shown by display name (lib/people).
+  const people = usePeopleDirectory();
   const { workspaceId, readState, markChannelRead, removeConversation } = useWorkspace();
   const navigate = useNavigate();
   const pageVisible = useDocumentVisible();
   const [messagesLoaded, setMessagesLoaded] = useState(false);
+  // QA H3: the first page failed to load (shown in the list, with Retry), and
+  // a counter that re-runs the load when Retry is pressed.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   // Read position captured when the conversation was opened (before this
   // view marks it read) — drives the "New messages" divider.
   const [openedAtPosition, setOpenedAtPosition] = useState<{ lastReadAt: string; lastReadMessageId: string | null } | null>(null);
@@ -171,6 +201,10 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   const [mentionOptions, setMentionOptions] = useState<{ id: string; username: string }[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [atBottom, setAtBottom] = useState(true);
+  // QA L12: whether the list stays pinned to its end. It starts true (a channel
+  // opens at its newest message); only the reader's own scrolling clears it,
+  // so content that grows after load — a link preview, an image — is followed.
+  const stickToBottomRef = useRef(true);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [activeThread, setActiveThread] = useState<ChatMessage | null>(null);
@@ -178,6 +212,12 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [reactingToId, setReactingToId] = useState<string | null>(null);
+  // QA H2: the React button the open picker belongs to (it is placed next to it).
+  const [reactionAnchor, setReactionAnchor] = useState<HTMLElement | null>(null);
+  const closeReactionPicker = useCallback(() => {
+    setReactingToId(null);
+    setReactionAnchor(null);
+  }, []);
   // T.39: touch layouts — press-and-hold a message for its actions, the "+" sheet, and the formatting toggle.
   const isPhone = useMediaQuery(PHONE_QUERY);
   const isTouch = useMediaQuery(COARSE_POINTER_QUERY);
@@ -223,8 +263,8 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   useEffect(() => {
     setTypingUsers([]);
     setActiveThread(null);
-    setReactingToId(null);
-  }, [channel?.id]);
+    closeReactionPicker();
+  }, [channel?.id, closeReactionPicker]);
 
   const channelId = channel?.id;
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -240,7 +280,9 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
     let cancelled = false;
     loadedRef.current = false;
     positionCapturedRef.current = false;
+    stickToBottomRef.current = true; // a (re)loaded history opens at its end
     setMessagesLoaded(false);
+    setLoadFailed(false);
     setOpenedAtPosition(null);
     setMessages([]);
     setError(null);
@@ -275,7 +317,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
     fetchLatest(false).catch(err => {
       if (cancelled) return;
       console.error('fetchMessages error:', err);
-      setError('Failed to load messages');
+      setLoadFailed(true);
     });
 
     // Runs after every reconnect once the server has restored subscriptions:
@@ -368,7 +410,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
       socket.off('error:unauthorized', handleUnauthorized);
       socket.off('subscriptions:ready', backfill);
     };
-  }, [channelId, socket, user?.id]);
+  }, [channelId, socket, user?.id, reloadKey]);
 
   // The main list's auto-scroll-to-bottom is now handled by Virtuoso's
   // `followOutput` prop — it only applies when new content lands at the tail
@@ -555,6 +597,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
     setSending(false);
     // Your own message should always come into view, even when you were
     // reading further up.
+    stickToBottomRef.current = true;
     requestAnimationFrame(() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' }));
   };
 
@@ -641,10 +684,18 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   // need to track "did I already react with this emoji" just to pick which
   // action to call.
   const handleReact = async (messageId: string, emoji: string) => {
-    setReactingToId(null);
+    closeReactionPicker();
+    // QA L14: shown at once (the socket update then confirms it); a refused
+    // reaction puts the previous list back.
+    const previous = messages.find((m) => m.id === messageId)?.reactions;
+    if (user && previous) {
+      const me = { id: user.id, username: user.username };
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: toggleReactionLocally(m.reactions ?? [], emoji, me) } : m)));
+    }
     try {
       await axios.post(`/api/messages/${messageId}/reactions`, { emoji });
     } catch (err) {
+      if (previous) setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, reactions: previous } : m)));
       // T.32 (audit FE-4): a refused reaction is explained, not swallowed.
       setError((err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Your reaction could not be saved. Please try again.');
     }
@@ -672,20 +723,37 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
 
   // P3: channels suggest matching members; DMs and group DMs suggest their
   // participants (lib/mentionCandidates).
+  // QA M6: suggestions could take seconds with no sign of life. The list now
+  // opens at once with "Searching people…", and answers are cached per
+  // channel and query for this view, so going back to a query is instant.
+  const [mentionLoading, setMentionLoading] = useState(false);
+  const mentionCacheRef = useRef(new Map<string, { id: string; username: string }[]>());
   useEffect(() => {
     if (mentionQuery === null) {
       setMentionOptions([]);
+      setMentionLoading(false);
+      return;
+    }
+    const key = `${channel.id}:${mentionQuery.toLowerCase()}`;
+    const cached = mentionCacheRef.current.get(key);
+    if (cached) {
+      setMentionOptions(cached);
+      setMentionIndex(0);
+      setMentionLoading(false);
       return;
     }
     let cancelled = false;
+    setMentionLoading(true);
     const timer = setTimeout(() => {
       fetchMentionCandidates(channel, mentionQuery, user?.id)
         .then((people) => {
           if (cancelled) return;
+          mentionCacheRef.current.set(key, people);
           setMentionOptions(people);
           setMentionIndex(0);
         })
-        .catch(() => !cancelled && setMentionOptions([]));
+        .catch(() => !cancelled && setMentionOptions([]))
+        .finally(() => !cancelled && setMentionLoading(false));
     }, 150);
     return () => {
       cancelled = true;
@@ -693,13 +761,20 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
     };
   }, [mentionQuery, channel.id, channel.isDM, user?.id]);
 
-  const mentionOpen = mentionQuery !== null && mentionOptions.length > 0;
+  const mentionOpen = mentionQuery !== null && (mentionOptions.length > 0 || mentionLoading);
   const chooseMention = (username: string) => {
     mainEditorRef.current?.completeMention(username);
     setMentionQuery(null);
   };
   const handleMentionKey = (key: string) => {
     if (!mentionOpen) return false;
+    // While suggestions are still loading there is nothing to pick: only
+    // Escape is taken; Enter/Tab/arrows keep their normal editor meaning.
+    if (mentionOptions.length === 0) {
+      if (key !== 'Escape') return false;
+      setMentionQuery(null);
+      return true;
+    }
     if (key === 'ArrowDown') setMentionIndex((i) => (i + 1) % mentionOptions.length);
     else if (key === 'ArrowUp') setMentionIndex((i) => (i - 1 + mentionOptions.length) % mentionOptions.length);
     else if (key === 'Enter' || key === 'Tab') chooseMention(mentionOptions[mentionIndex]?.username ?? mentionOptions[0].username);
@@ -738,6 +813,42 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   // thread reply opens its parent's thread; anything older than the loaded
   // window gets an honest hint instead of a silent no-op.
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // QA L12: the list's scrolling element. Virtuoso's `align: 'end'` is worked
+  // out from summed (rounded) item sizes and could stop a few pixels short of
+  // the real end — enough for "Jump to latest" to sit over the last message —
+  // so pinning sets the element's real end instead.
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  const pinnedCountRef = useRef(0);
+  const bindScroller = useCallback((el: HTMLElement | Window | null) => setScrollerEl(el instanceof HTMLElement ? el : null), []);
+  const pinToBottom = useCallback(() => {
+    if (scrollerEl && stickToBottomRef.current) scrollerEl.scrollTop = scrollerEl.scrollHeight;
+  }, [scrollerEl]);
+  useEffect(() => {
+    if (!scrollerEl) return;
+    // Scrolls that follow the reader's own input (wheel, touch, scrollbar,
+    // keys) decide whether to stay pinned; Virtuoso's own adjustments don't.
+    let userInputAt = 0;
+    const markUserInput = () => {
+      userInputAt = Date.now();
+    };
+    const onScroll = () => {
+      const gap = scrollerEl.scrollHeight - scrollerEl.scrollTop - scrollerEl.clientHeight;
+      const byUser = Date.now() - userInputAt < USER_SCROLL_WINDOW_MS;
+      if (gap <= STICK_TO_BOTTOM_SLACK_PX) {
+        stickToBottomRef.current = true;
+        if (gap > 0 && !byUser) scrollerEl.scrollTop = scrollerEl.scrollHeight; // a programmatic near-miss
+      } else if (byUser) {
+        stickToBottomRef.current = false;
+      }
+    };
+    const inputs = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+    inputs.forEach((type) => scrollerEl.addEventListener(type, markUserInput, { passive: true }));
+    scrollerEl.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      inputs.forEach((type) => scrollerEl.removeEventListener(type, markUserInput));
+      scrollerEl.removeEventListener('scroll', onScroll);
+    };
+  }, [scrollerEl]);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const focusMessage = useCallback(
     (target: MessageFocusTarget) => {
@@ -752,6 +863,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
           toast.info('That message is further back — scroll up to load earlier messages.');
           return;
         }
+        stickToBottomRef.current = false; // showing an earlier message: don't pull back to the end
         virtuosoRef.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' });
         setHighlightedId(target.messageId);
     },
@@ -875,6 +987,8 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   }, [channel.id, channel.isDM, refreshDetails, socket]);
 
   const composer = composerState(channel.isDM ? null : channelDetails);
+  // QA H4: a 1:1 DM is titled with the other person's display name.
+  const headerName = channel.isDM && !channel.isGroupDM ? nameIn(people, { id: channel.otherUserId, username: channel.name }, channel.name) : channel.name;
   const caps = channelDetails?.capabilities;
   // T.32 (audit FE-4): archived conversations are read-only on the server —
   // the UI no longer offers writes that would only fail.
@@ -922,7 +1036,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
         role="article"
         tabIndex={isPending(m) ? -1 : 0}
         {...(isPending(m) ? {} : messageLongPress({ message: m, isThreadView }))}
-        aria-label={`${m.sender?.username ?? 'Someone'}, ${format(new Date(m.createdAt), 'h:mm a')}`}
+        aria-label={`${nameIn(people, m.sender, 'Someone')}, ${format(new Date(m.createdAt), 'h:mm a')}`}
         className={`max-md:select-none max-md:[-webkit-touch-callout:none] group relative flex gap-3 rounded-lg outline-none transition-colors hover:bg-surface-secondary focus-visible:bg-surface-secondary focus-visible:ring-2 focus-visible:ring-focus ${grouped ? 'px-3 py-0.5 @lg:px-5' : 'px-3 pt-2 pb-1 @lg:px-5 @lg:pt-2.5'} ${m.isPinned && !isThreadView ? 'bg-warning-soft/50 shadow-[inset_2px_0_0_var(--color-warning)]' : ''} ${m.deliveryState === 'pending' ? 'opacity-60' : ''} ${!isThreadView && highlightedId === m.id ? 'ring-2 ring-brand bg-brand-soft' : ''} ${Date.now() - new Date(m.createdAt).getTime() < 8000 ? 'animate-message-in' : ''}`}
       >
         {m.isPinned && !isThreadView && (
@@ -937,15 +1051,18 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
             {format(new Date(m.createdAt), 'h:mm')}
           </div>
         ) : (
-          <Avatar name={m.sender?.username} size="md" className="mt-0.5" />
+          <Avatar name={nameIn(people, m.sender, 'Someone')} userId={m.sender?.id} size="md" className="mt-0.5" />
         )}
         <div className="flex-1 min-w-0 relative">
           {grouped ? (
-            <span className="sr-only">{m.sender?.username} at {format(new Date(m.createdAt), 'h:mm a')}</span>
+            <span className="sr-only">{nameIn(people, m.sender, 'Someone')} at {format(new Date(m.createdAt), 'h:mm a')}</span>
           ) : (
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="font-semibold text-fg text-[14px] truncate min-w-0">{m.sender?.username}</span>
+            <span className="font-semibold text-fg text-[14px] truncate min-w-0">{nameIn(people, m.sender, 'Someone')}</span>
             <time dateTime={m.createdAt} title={format(new Date(m.createdAt), 'PPpp')} className="text-xs text-fg-subtle tabular-nums shrink-0">{format(new Date(m.createdAt), 'h:mm a')}</time>
+            {m.editedAt && (
+              <span className="text-xs text-fg-subtle shrink-0" title={`Edited ${format(new Date(m.editedAt), 'PPp')}`}>(edited)</span>
+            )}
           </div>
           )}
           
@@ -1019,8 +1136,10 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
                 !isAudioMsg && (
                   <>
                   <div className="rich-text mt-0.5 text-[15px] text-fg leading-relaxed break-words" dangerouslySetInnerHTML={{ __html: sanitizeMessageHtml(m.content ?? '') }} />
-                  {m.editedAt && (
-                    <span className="text-[11px] text-fg-subtle" title={`Edited ${format(new Date(m.editedAt), 'PPp')}`}>(edited)</span>
+                  {/* QA L15: next to the time in the header; here only for grouped
+                      messages (no header), at a readable size. */}
+                  {m.editedAt && grouped && (
+                    <span className="text-xs text-fg-subtle" title={`Edited ${format(new Date(m.editedAt), 'PPp')}`}>(edited)</span>
                   )}
                   </>
                 )
@@ -1070,7 +1189,9 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
                   title={reaction.users.map(u => u.username).join(', ')}
                   aria-label={`${reaction.emoji} ${reaction.count}: ${reactedByMe ? 'remove your reaction' : 'react'} (${reaction.users.map(u => u.username).join(', ')})`}
                   aria-pressed={reactedByMe}
-                  className={`inline-flex h-6 items-center gap-1 px-2 rounded-full text-[13px] border transition-colors ${
+                  // QA L26: on phones the tap area extends to ~44px tall (invisible),
+                  // above the next message (z-1) so that message doesn't cover it.
+                  className={`relative max-md:z-[1] max-md:before:absolute max-md:before:-inset-y-2.5 max-md:before:inset-x-0 max-md:before:content-[''] inline-flex h-6 items-center gap-1 px-2 rounded-full text-[13px] border transition-colors ${
                     reactedByMe
                       ? 'bg-brand-soft border-brand/40 hover:border-brand/70'
                       : 'bg-surface hover:bg-surface-secondary border-line hover:border-border-strong'
@@ -1086,7 +1207,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
               <button
                 type="button"
                 onClick={() => setActiveThread(m)}
-                className="flex h-6 items-center gap-1.5 text-xs font-semibold text-brand hover:bg-brand-soft px-2 rounded-md transition-colors"
+                className="relative max-md:z-[1] max-md:before:absolute max-md:before:-inset-y-2.5 max-md:before:inset-x-0 max-md:before:content-[''] flex h-6 items-center gap-1.5 text-xs font-semibold text-brand hover:bg-brand-soft px-2 rounded-md transition-colors"
               >
                 <MessageSquare size={13} aria-hidden="true" />
                 {replyCount} {replyCount === 1 ? 'reply' : 'replies'}
@@ -1101,19 +1222,22 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
             </p>
           )}
 
-          {reactingToId === m.id && (
-            <div className="absolute top-12 left-0 z-50 shadow-2xl rounded-xl border border-border-subtle overflow-hidden bg-white animate-scale-in">
-              <EmojiPicker onPick={(emoji) => handleReact(m.id, emoji)} />
-            </div>
-          )}
           {/* P3: message actions — a row beneath the message when the column is
               narrow (touch: tap the message), floating above it when wide. */}
-          {!isPending(m) && (
+          {/* QA L15: hidden while this message is being edited (it overlapped the edit box). */}
+          {!isPending(m) && editingId !== m.id && (
           <div role="toolbar" aria-label="Message actions" className="mt-1.5 w-fit @lg:mt-0 @lg:absolute @lg:-right-1 @lg:-top-5 hidden group-hover:flex group-focus-within:flex items-center gap-0.5 bg-surface border border-line rounded-lg shadow-md p-0.5 z-10 animate-pop-in">
             {canReactHere && (
               <button
                 type="button"
-                onClick={() => setReactingToId(reactingToId === m.id ? null : m.id)}
+                onClick={(e) => {
+                  if (reactingToId === m.id) closeReactionPicker();
+                  else {
+                    setReactingToId(m.id);
+                    setReactionAnchor(e.currentTarget);
+                  }
+                }}
+                aria-expanded={reactingToId === m.id}
                 className={ACTION_BUTTON}
                 title="Add reaction"
                 aria-label="Add reaction"
@@ -1193,7 +1317,10 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
   };
 
   return (
-    <div className="@container/chat flex h-full bg-surface relative w-full overflow-hidden" onClick={() => setReactingToId(null)}>
+    <div className="@container/chat flex h-full bg-surface relative w-full overflow-hidden">
+      {reactingToId && reactionAnchor && (
+        <ReactionPicker anchor={reactionAnchor} onPick={(emoji) => handleReact(reactingToId, emoji)} onClose={closeReactionPicker} />
+      )}
       <div className={`@container flex flex-col h-full min-w-0 flex-1 ${activeThread ? 'border-r border-border-subtle' : ''}`}>
         
         <div className="border-b border-line bg-surface px-3 @lg:px-5 flex items-center justify-between gap-3 shrink-0 h-14 max-md:h-[calc(3.5rem+env(safe-area-inset-top))] max-md:pt-[env(safe-area-inset-top)] max-md:pl-1.5">
@@ -1208,7 +1335,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
               <ChevronLeft size={26} aria-hidden="true" />
             </button>
             {channel.isDM && !channel.isGroupDM ? (
-              <Avatar name={channel.name} size="sm" presence={dmPartnerOnline ? 'online' : 'offline'} />
+              <Avatar name={headerName} userId={channel.otherUserId} size="sm" presence={dmPartnerOnline ? 'online' : 'offline'} />
             ) : (
               // T.39: phones drop the decorative channel icon (the back button and subtitle already orient).
               <div className={`w-7 h-7 shrink-0 rounded-md bg-surface-tertiary flex items-center justify-center text-fg-muted font-semibold text-sm ${channel.isGroupDM ? '' : 'max-md:hidden'}`} aria-hidden="true">
@@ -1217,7 +1344,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
             )}
             <div className="min-w-0">
               <h2 className="font-semibold text-[15px] text-fg flex items-center gap-2 min-w-0 tracking-[-0.01em]">
-                <span className="truncate">{channel.name}</span>
+                <span className="truncate">{headerName}</span>
                 {!channel.isDM && channelDetails?.visibility === 'PRIVATE' && (
                   <Lock size={16} className="text-gray-400 shrink-0" aria-label="Private channel" />
                 )}
@@ -1236,7 +1363,8 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
                   : channel.isDM
                     ? (dmPartnerOnline ? 'Active now' : 'Direct message')
                     : channelDetails?.topic || channelDetails?.description || channel.description ||
-                      (channelDetails ? channelTypeLabel(channelDetails) : 'Channel')}
+                      // QA L27: nothing until the details arrive (it used to say "Channel", then change).
+                      (channelDetails ? channelTypeLabel(channelDetails) : '\u00a0')}
               </p>
             </div>
           </div>
@@ -1393,10 +1521,27 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
         )}
 
         <div className="flex-1 min-h-0 bg-white px-1 py-2 @lg:px-4 @lg:py-4 relative" onClick={(e) => e.stopPropagation()}>
+          {/* QA H3: "No messages yet" only once the history has actually loaded
+              and is empty; a skeleton while it loads; an error with Retry if
+              it failed. */}
           {mainMessages.length === 0 ? (
-            <div className="h-full flex items-center justify-center text-gray-400 font-medium">
-              No messages yet — say hello!
-            </div>
+            !messagesLoaded ? (
+              loadFailed ? (
+                <div role="alert" className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                  <p className="text-sm font-medium text-fg">Messages couldn’t be loaded.</p>
+                  <p className="text-xs text-fg-muted">Check your connection, then try again.</p>
+                  <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-fg hover:bg-surface-secondary">
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <MessageListSkeleton />
+              )
+            ) : (
+              <div className="h-full flex items-center justify-center text-gray-400 font-medium">
+                No messages yet — say hello!
+              </div>
+            )
           ) : (
             <Virtuoso
               ref={virtuosoRef}
@@ -1404,10 +1549,25 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
               className="slack-scrollbar overflow-x-hidden"
               data={mainMessages}
               firstItemIndex={firstItemIndex}
-              initialTopMostItemIndex={mainMessages.length - 1}
+              // QA L12: open with the END of the last message in view, and stay
+              // at the end when something below grows after load (a link
+              // preview, an image) — it used to cut the last message off.
+              initialTopMostItemIndex={{ index: mainMessages.length - 1, align: 'end' }}
+              scrollerRef={bindScroller}
+              atBottomThreshold={STICK_TO_BOTTOM_SLACK_PX}
               startReached={loadMoreMessages}
               followOutput="smooth"
               atBottomStateChange={setAtBottom}
+              totalListHeightChanged={() => {
+                if (!stickToBottomRef.current) return;
+                // Newly arrived messages: followOutput scrolls to them smoothly.
+                // Anything else (a preview or image growing) is pinned here.
+                if (pinnedCountRef.current !== mainMessages.length) {
+                  pinnedCountRef.current = mainMessages.length;
+                  return;
+                }
+                requestAnimationFrame(pinToBottom);
+              }}
               computeItemKey={(_index, m) => m.id}
               itemContent={(_index, m) => (
                 <>
@@ -1436,13 +1596,19 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
                       Loading earlier messages…
                     </div>
                   ) : null,
+                // QA L26: room under the last message, so its reaction pills' and
+                // reply link's enlarged phone tap area isn't cut by the list edge.
+                Footer: () => <div className="max-md:h-3" aria-hidden="true" />,
               }}
             />
           )}
           {!atBottom && mainMessages.length > 0 && (
             <button
               type="button"
-              onClick={() => virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' })}
+              onClick={() => {
+                stickToBottomRef.current = true;
+                virtuosoRef.current?.scrollToIndex({ index: 'LAST', behavior: 'smooth' });
+              }}
               className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 rounded-full bg-brand text-on-brand text-xs font-semibold px-4 py-2 shadow-lg hover:opacity-90"
             >
               <ArrowDown size={14} aria-hidden="true" /> Jump to latest
@@ -1518,6 +1684,11 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
               aria-label="People to mention"
               className="absolute bottom-full left-5 mb-2 z-50 w-64 max-h-64 overflow-y-auto rounded-xl border border-line bg-surface shadow-xl py-1"
             >
+              {mentionLoading && mentionOptions.length === 0 && (
+                <li role="status" className="flex items-center gap-2 px-3 py-2 text-sm text-fg-muted">
+                  <Loader2 size={14} className="animate-spin" aria-hidden="true" /> Searching people…
+                </li>
+              )}
               {mentionOptions.map((option, index) => (
                 <li
                   key={option.id}
@@ -1528,10 +1699,12 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
                   onClick={() => chooseMention(option.username)}
                   className={`flex items-center gap-2 px-3 py-2 text-sm cursor-pointer ${index === mentionIndex ? 'bg-brand-soft text-fg' : 'text-fg'}`}
                 >
-                  <span aria-hidden="true" className="w-6 h-6 rounded-md bg-brand text-on-brand text-xs font-bold uppercase flex items-center justify-center">
-                    {option.username[0]}
+                  {/* QA H4: the person's name with their @handle (what gets inserted). */}
+                  <Avatar name={nameIn(people, option)} userId={option.id} size="xs" />
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-medium">{nameIn(people, option)}</span>{' '}
+                    <span className="text-fg-muted">@{option.username}</span>
                   </span>
-                  @{option.username}
                 </li>
               ))}
             </ul>
@@ -1569,7 +1742,7 @@ export const ChatArea = ({ channel, socket, onlineUsers = [], onStartCall }: Cha
               <div className={voiceOpen ? 'hidden' : 'w-full px-3 pt-2.5 pb-1 @lg:px-4'}>
                 <RichTextEditor
                   ref={mainEditorRef}
-                  placeholder={channel.isDM ? `Message ${channel.name}` : isPhone ? `Message #${channel.name}` : `Message #${channel.name} (Type '/' for commands)`}
+                  placeholder={channel.isDM ? `Message ${headerName}` : isPhone ? `Message #${channel.name}` : `Message #${channel.name} (Type '/' for commands)`}
                   enterSends={!(isPhone && isTouch)}
                   formattingHiddenOnPhone={!formattingOpen}
                   initialContent={initialDraft?.html ?? ''}

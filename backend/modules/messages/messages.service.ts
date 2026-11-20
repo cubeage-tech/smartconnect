@@ -222,8 +222,10 @@ export const searchMessagesGlobal = async (query: string) => {
       channel: { isDM: false },
     },
     include: {
-      sender: { select: { id: true, username: true } },
-      channel: { select: { id: true, name: true } },
+      // QA H6: the sender's display name and the channel's workspace, so a
+      // moderator can tell people and the several "General" channels apart.
+      sender: { select: { id: true, username: true, profile: { select: { displayName: true } } } },
+      channel: { select: { id: true, name: true, workspace: { select: { id: true, name: true } } } },
     },
     orderBy: { createdAt: 'desc' },
     take: 50,

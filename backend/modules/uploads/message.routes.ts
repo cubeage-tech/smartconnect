@@ -4,6 +4,7 @@ import { AuthenticatedRequest } from '../../middleware/auth.middleware';
 import { requireSessionUser } from '../../middleware/identity.middleware';
 import { userRateLimit } from '../../middleware/userRateLimit.middleware';
 import { attachmentPath, cleanOriginalName, destroyAttachments, loadVisibleAttachment, signedAttachmentUrl } from '../../lib/attachments';
+import { storageHttpCode } from '../../lib/cloudinary';
 import { prisma } from '../../lib/prisma';
 import { StoredAsset, upload } from './upload.middleware';
 
@@ -113,12 +114,15 @@ router.get('/attachments/:id', ...requireSessionUser, attachmentLinkLimiter, asy
 // the reason goes to the server log only.
 const STORAGE_NOT_CONFIGURED = 'File uploads are not available on this server right now. Your file was not sent.';
 const STORAGE_UNAVAILABLE = 'File storage is temporarily unavailable. Your file was not sent — please try again.';
+const STORAGE_QUOTA = 'File storage has reached its usage limit for now. Your file was not sent — please try again later.';
 const NETWORK_ERROR_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE']);
 
-const storageFailure = (err: unknown): 'credentials' | 'unavailable' | null => {
-  const httpCode = (err as { http_code?: unknown })?.http_code;
-  if (typeof httpCode === 'number') {
+const storageFailure = (err: unknown): 'credentials' | 'quota' | 'unavailable' | null => {
+  const httpCode = storageHttpCode(err);
+  if (httpCode !== null) {
     if (httpCode === 401 || httpCode === 403 || httpCode === 404) return 'credentials';
+    // QA C1: Cloudinary's rate/usage limit (420) is told apart from an outage.
+    if (httpCode === 420 || httpCode === 429) return 'quota';
     if (httpCode === 400) return null; // storage refused this particular file: a file problem
     return 'unavailable';
   }
@@ -131,6 +135,11 @@ export const handleUploadErrors = (err: unknown, _req: Request, res: Response, n
   if (storage === 'credentials') {
     console.error(`Upload failed: storage rejected the server's credentials (HTTP ${(err as { http_code: number }).http_code}). Check CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.`);
     return res.status(503).json({ success: false, message: STORAGE_NOT_CONFIGURED });
+  }
+  if (storage === 'quota') {
+    console.error(`Upload failed: file storage usage or rate limit reached (HTTP ${storageHttpCode(err)}).`);
+    res.setHeader('Retry-After', '300');
+    return res.status(503).json({ success: false, message: STORAGE_QUOTA });
   }
   if (storage === 'unavailable') {
     console.error('Upload failed: file storage unavailable:', (err as { message?: string })?.message ?? err);

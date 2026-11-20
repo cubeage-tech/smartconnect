@@ -68,6 +68,12 @@ const CardSkeleton = () => (
 );
 
 export const ProjectsPage = () => {
+  // QA L33: load the project page's code now, so opening a project (or the one
+  // just created) shows it at once. Navigations run in a transition, which kept
+  // this list on screen while that code downloaded.
+  useEffect(() => {
+    void import('./ProjectPage').catch((err) => console.warn('Could not preload the project page:', err));
+  }, []);
   const { workspaceId, socket } = useWorkspace();
   const navigate = useNavigate();
   const [status, setStatus] = useState<'active' | 'archived'>('active');

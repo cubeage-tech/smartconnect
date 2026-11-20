@@ -2,6 +2,7 @@ import { ArrowLeftRight, ClipboardList, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { MoreView } from '../../components/layout/MoreView';
 import { Avatar } from '../../components/ui/Avatar';
+import { usePersonName } from '../../lib/people';
 import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
 import { useAuth } from '../../contexts/AuthContext';
 import { openNavigationDrawer } from './ChatsPage';
@@ -15,6 +16,7 @@ import { useWorkspaces } from './WorkspacesProvider';
  */
 const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void }) => {
   const { user, logout } = useAuth();
+  const myName = usePersonName(user, '?'); // QA H4: your display name, as in the header
   const { workspaceId } = useWorkspace();
   const workspace = useWorkspaces().getWorkspace(workspaceId);
   const leads = !!workspace && !workspace.isDefault && !!workspace.capabilities?.canManage;
@@ -22,9 +24,9 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
   return (
     <div className="-mx-2 mb-8 space-y-4 md:hidden">
       <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface-secondary p-4">
-        <Avatar name={user?.username ?? '?'} size="lg" presence="online" />
+        <Avatar name={myName} userId={user?.id} size="lg" presence="online" />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold text-fg">{user?.username}</p>
+          <p className="truncate text-base font-semibold text-fg">{myName}</p>
           <p className="truncate text-sm text-fg-muted">{user?.email}</p>
         </div>
       </div>

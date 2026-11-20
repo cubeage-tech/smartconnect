@@ -1,3 +1,5 @@
+import { setPeople } from '../../lib/people';
+import { OTHER_WORKSPACE_MESSAGE } from '../../lib/workspaceEvents';
 import { LoadingScreen } from '../../components/ui/LoadingScreen';
 import axios from 'axios';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -351,7 +353,14 @@ export const WorkspaceLayout = () => {
     fetchDMs();
     fetchReadState();
     if (token) {
-      axios.get<User[]>('/api/users').then(res => setUsers(res.data)).catch(() => undefined); // T.32: a failed directory load must not surface as an unhandled rejection
+      axios
+        .get<User[]>('/api/users')
+        .then(res => {
+          setUsers(res.data);
+          // QA H4: one display name / photo per person on every screen (lib/people).
+          setPeople(res.data);
+        })
+        .catch((err) => console.warn('Could not load the people directory:', err)); // T.32: a failed directory load must not surface as an unhandled rejection
     }
   }, [token, fetchChannels, fetchDMs, fetchReadState]);
 
@@ -437,7 +446,11 @@ export const WorkspaceLayout = () => {
       // P3: rooms of the user's OTHER workspaces are subscribed too; their
       // traffic must neither refetch here nor count toward this workspace's
       // unread badges.
-      if (msg.workspaceId && msg.workspaceId !== workspaceId) return;
+      if (msg.workspaceId && msg.workspaceId !== workspaceId) {
+        // QA M12: tell the workspace rail another workspace has news.
+        if (msg.senderId !== user?.id) window.dispatchEvent(new CustomEvent(OTHER_WORKSPACE_MESSAGE, { detail: { workspaceId: msg.workspaceId } }));
+        return;
+      }
       const knownChannel = channelsRef.current.some(c => c.id === msg.channelId);
       const knownDM = dmsRef.current.find(d => d.id === msg.channelId);
       if (!knownChannel && !knownDM && !requestedUnknown.has(msg.channelId)) {
@@ -559,32 +572,48 @@ export const WorkspaceLayout = () => {
     };
   }, [socket, currentChannelId, user, workspaceId, addChannel, fetchChannels, fetchDMs, fetchReadState, upsertDM, removeConversation, navigate, refreshWorkspaces]);
 
+  // QA M18: the unread Activity count is loaded once per workspace. It used to
+  // reload when the socket connected and again on its first
+  // "subscriptions:ready" — three identical requests per workspace open.
+  const reloadActivityRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (!workspaceId || !token) return;
     let cancelled = false;
+    let lastLoad = 0;
     setActivityUnread(0);
-    const load = () =>
+    const load = () => {
+      lastLoad = Date.now();
       activityApi
         .listNotifications(workspaceId)
         .then((res) => {
           if (!cancelled) setActivityUnread(res.unreadCount);
         })
-        .catch(() => undefined);
-    void load();
-    if (!socket) return () => { cancelled = true; };
+        .catch((err) => console.warn('Could not load the Activity count:', err));
+    };
+    load();
+    // After a reconnect, catch up on anything that arrived while offline (not
+    // right after the load above).
+    reloadActivityRef.current = () => {
+      if (Date.now() - lastLoad > 5000) load();
+    };
+    return () => {
+      cancelled = true;
+      reloadActivityRef.current = () => undefined;
+    };
+  }, [workspaceId, token]);
+  useEffect(() => {
+    if (!socket || !workspaceId) return;
     const onNew = (n: { workspaceId?: string; isRead?: boolean } | null) => {
       if (n?.workspaceId === workspaceId && !n.isRead) setActivityUnread((count) => count + 1);
     };
-    // After a reconnect, catch up on anything that arrived while offline.
-    const onReady = () => void load();
+    const onReady = () => reloadActivityRef.current();
     socket.on('notification:new', onNew);
     socket.on('subscriptions:ready', onReady);
     return () => {
-      cancelled = true;
       socket.off('notification:new', onNew);
       socket.off('subscriptions:ready', onReady);
     };
-  }, [workspaceId, token, socket]);
+  }, [socket, workspaceId]);
 
   // Only reachable if someone hand-types a malformed URL — the router always
   // supplies :workspaceId for anything mounted under this layout.
@@ -673,11 +702,12 @@ export const WorkspaceLayout = () => {
         )}
 
         {/* T.33: ⌘K command palette — search and jump anywhere in the workspace. */}
-        {workspaceId && <CommandPalette workspaceId={workspaceId} onMessagePerson={startDM} />}
+        {workspaceId && <CommandPalette workspaceId={workspaceId} onMessagePerson={startDM} channels={channels} />}
 
         <Header
           onMenuClick={() => (isTabletWidth() ? toggleTabletSidebar() : setIsSidebarOpen(!isSidebarOpen))}
           hideOnPhone={isConversation}
+          hideSearchOnPhone={location.pathname === `/${workspaceId}/chats`}
           sidebarHidden={tabletSidebarHidden}
           searchScope={currentChannel ? { id: currentChannel.id, name: currentChannel.name, isDM: !!currentChannel.isDM } : null}
         />

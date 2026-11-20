@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('../utils/mailer', () => ({
   sendOtpEmail: vi.fn().mockResolvedValue(undefined),
-  sendResetPasswordEmail: vi.fn().mockResolvedValue(undefined),
+  sendResetPasswordEmail: vi.fn().mockResolvedValue({ sent: true }),
   sendInviteEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -12,7 +12,7 @@ import { app } from '../app';
 import { prisma } from '../lib/prisma';
 import { isAdminUser } from '../middleware/admin.middleware';
 import { sendResetPasswordEmail } from '../utils/mailer';
-import { authHeader, createAndLoginUser } from './helpers';
+import { authHeader, createAndLoginUser, withFakeEmailSettings } from './helpers';
 import { useSocketHarness } from './socket-harness';
 
 /**
@@ -86,7 +86,7 @@ describe('T.32 H1 — server-side session revocation', () => {
   it('a password reset by e-mailed link ends every existing session', async () => {
     const { user, token } = await createAndLoginUser();
     vi.mocked(sendResetPasswordEmail).mockClear();
-    expect((await request(app).post('/api/auth/forgot-password').send({ email: user.email })).status).toBe(200);
+    expect((await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: user.email }))).status).toBe(200);
     const link = new URL(vi.mocked(sendResetPasswordEmail).mock.calls[0][1] as string);
     const reset = await request(app)
       .post('/api/auth/reset-password')

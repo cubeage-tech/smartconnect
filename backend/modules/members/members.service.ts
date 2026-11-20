@@ -1,3 +1,4 @@
+import { RESERVED_LOGINS } from '../../lib/systemAccounts';
 import { logAuditEvent } from '../../lib/auditLog';
 import { userIdsByEmail } from '../../lib/identity';
 import { isUuid } from '../../lib/messageInput';
@@ -153,7 +154,6 @@ export const getMemberProfile = async (viewer: DirectoryViewer, workspaceId: str
 // back: they accept (or decline) the invitation in the app, like every other
 // existing-account invitation (invitations.service).
 
-const RESERVED_LOGINS = [SYSTEM_USER_EMAIL, 'deleted-user@system.internal'];
 
 /** GET /api/workspaces/:workspaceId/member-candidates?q= — active accounts not yet in the workspace. */
 export const searchMemberCandidates = async (actorId: string, workspaceId: string, query: { q?: unknown }) => {

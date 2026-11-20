@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { corsOrigins, DEV_APP_URL, normalizeAppUrl, trustProxySetting } from './deployment';
 import { missingEmailSettings } from '../lib/emailDelivery';
+import { credentialSetting } from '../lib/settings';
 
 dotenv.config();
 
@@ -30,11 +31,14 @@ export const APP_URL = appUrl ?? DEV_APP_URL;
 export const ALLOWED_ORIGINS = corsOrigins(NODE_ENV, APP_URL);
 export const TRUST_PROXY = trustProxySetting(NODE_ENV, process.env.TRUST_PROXY);
 
+export { credentialSetting };
+
 // Fail fast rather than let every upload silently 500 the first time someone
-// attaches a file — same reasoning as JWT_SECRET above.
-export const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME;
-export const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY;
-export const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET;
+// attaches a file — same reasoning as JWT_SECRET above. Whether the values are
+// accepted by Cloudinary is checked after startup (lib/cloudinary.ts).
+export const CLOUDINARY_CLOUD_NAME = credentialSetting(process.env.CLOUDINARY_CLOUD_NAME);
+export const CLOUDINARY_API_KEY = credentialSetting(process.env.CLOUDINARY_API_KEY);
+export const CLOUDINARY_API_SECRET = credentialSetting(process.env.CLOUDINARY_API_SECRET);
 if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
   console.error('FATAL: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET must all be set. Exiting.');
   process.exit(1);

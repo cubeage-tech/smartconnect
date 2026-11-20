@@ -72,7 +72,8 @@ export const DueChip = ({ task }: { task: Pick<TaskView, 'dueDate' | 'overdue' |
 export const AssigneeAvatar = ({ user, size = 'xs' }: { user: UserRef | null; size?: 'xs' | 'sm' }) =>
   user ? (
     <span title={`Assigned to ${personName(user)}`} className="inline-flex">
-      <Avatar name={personName(user)} size={size} />
+      {/* QA L9: coloured by the person's id, like every other avatar. */}
+      <Avatar name={personName(user)} userId={user.id} size={size} />
       <span className="sr-only">Assigned to {personName(user)}</span>
     </span>
   ) : (

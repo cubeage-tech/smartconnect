@@ -99,7 +99,7 @@ describe('Header', () => {
     expect(screen.getByRole('button', { name: /invite people/i })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Search messages in #general' })).toBeEnabled();
 
-    fireEvent.click(screen.getByText('AN')); // avatar opens the profile menu
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' })); // avatar opens the profile menu
     expect(screen.getByText('ann@example.com')).toBeInTheDocument();
     expect(screen.queryByText(/Add Birthdate/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Add Phone Number/)).not.toBeInTheDocument();
@@ -108,13 +108,13 @@ describe('Header', () => {
   it('never shows a placeholder e-mail', () => {
     auth.user = { id: 'me', username: 'ann' };
     render(<MemoryRouter><Header /></MemoryRouter>);
-    fireEvent.click(screen.getByText('AN'));
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' }));
     expect(screen.queryByText(/@example\.com/)).not.toBeInTheDocument();
   });
 
   it('account-menu theme buttons show a choice made in another switcher', () => {
     render(<MemoryRouter><Header /></MemoryRouter>);
-    fireEvent.click(screen.getByText('AN'));
+    fireEvent.click(screen.getByRole('button', { name: 'Account menu' }));
     act(() => void setThemePreference('dark')); // e.g. the phone's More tab
     expect(screen.getByRole('button', { name: 'dark' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'system' })).toHaveAttribute('aria-pressed', 'false');

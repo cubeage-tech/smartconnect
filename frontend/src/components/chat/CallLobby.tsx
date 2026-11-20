@@ -1,3 +1,4 @@
+import { Layer } from '../ui/Layer';
 import { Loader2, Mic, MicOff, Phone, Video, VideoOff, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { levelFromRms, recorderErrorMessage } from '../../lib/voice';
@@ -131,8 +132,11 @@ export const CallLobby = ({ callType, title, joinLabel, onJoin, onCancel }: Call
   const toggle = 'flex h-11 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus';
   const select = 'h-9 w-full min-w-0 rounded-lg border border-line bg-surface px-2 text-sm text-fg';
 
+  // QA M2: rendered at the end of <body> (ui/Layer) above the app header, so
+  // the header is covered like the rest of the page while choosing devices.
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="call-lobby-title">
+    <Layer>
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="call-lobby-title">
       <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-line bg-surface-raised shadow-2xl">
         <header className="flex items-center gap-2 border-b border-line px-5 py-3">
           {callType === 'video' ? <Video size={16} className="text-brand" aria-hidden="true" /> : <Phone size={16} className="text-brand" aria-hidden="true" />}
@@ -236,5 +240,6 @@ export const CallLobby = ({ callType, title, joinLabel, onJoin, onCancel }: Call
         </footer>
       </div>
     </div>
+    </Layer>
   );
 };

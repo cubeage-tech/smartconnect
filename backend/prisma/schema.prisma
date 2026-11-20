@@ -1,5 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // QA M18: load relations (include/select of related records) in the same SQL
+  // statement with JOINs instead of one extra query per relation. Every
+  // request paid several extra database round trips for this, which with the
+  // database in another region added seconds (docs/SMARTCONNECT_QA_FINAL_REPORT.md).
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -661,19 +666,24 @@ model ChannelMember {
 // Collaboration profile and preferences (Batch 2). Deliberately separate from
 // User so no authentication-related table or column is modified.
 model UserProfile {
-  userId              String   @id
-  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String      @id
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   // P2: optional display name (set by the user or a platform admin at account
   // creation); the unique username stays the identifier. Nullable and additive.
   displayName         String?
   title               String?
   bio                 String?
   timezone            String?
+  // QA H4: profile photo — an image the user uploaded (private, served through
+  // a signed link to people who share a workspace with them). SetNull: deleting
+  // the file leaves the profile without a photo. Additive and nullable.
+  avatarAttachmentId  String?     @unique
+  avatarAttachment    Attachment? @relation("UserAvatar", fields: [avatarAttachmentId], references: [id], onDelete: SetNull)
   // Reciprocal, like Microsoft Teams: when off, the user neither sends read
   // receipts nor sees anyone else's.
-  readReceiptsEnabled Boolean  @default(true)
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  readReceiptsEnabled Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 }
 
 // Stage 1 (T.19) — the company hierarchy: Company Admin → Team Lead → Member.
@@ -768,11 +778,11 @@ model AccountInvitation {
 // (lib/attachments.ts). The uploader is recorded at upload time and only the
 // uploader can attach it, exactly once (messageId is set on send).
 model Attachment {
-  id           String   @id @default(uuid())
+  id           String       @id @default(uuid())
   // Cloudinary public id (includes the "workspace-uploads/" folder).
-  publicId     String   @unique
+  publicId     String       @unique
   resourceType String
-  deliveryType String   @default("authenticated")
+  deliveryType String       @default("authenticated")
   // Cloudinary's detected format for image/video assets (null for raw files,
   // whose extension is part of publicId).
   format       String?
@@ -782,19 +792,21 @@ model Attachment {
   // SetNull: a deleted account's messages survive (reassigned to the
   // sentinel), so their attachments must too.
   uploaderId   String?
-  uploader     User?    @relation("AttachmentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+  uploader     User?        @relation("AttachmentUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
   // Set exactly once when the upload is sent in a message. SetNull when the
   // message goes (channel/workspace deletion cascades): the asset is then an
   // orphan and is destroyed by the attachment sweeper.
-  messageId    String?  @unique
-  message      Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  messageId    String?      @unique
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
   // T.33: a file attached to a task (SetNull: the sweeper destroys orphans).
   taskId       String?
-  task         Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  task         Task?        @relation(fields: [taskId], references: [id], onDelete: SetNull)
   // T.33: voice notes — recorded length and a compact waveform ("0..100" x ≤ 64).
   durationMs   Int?
-  waveform     String?  @db.VarChar(400)
-  createdAt    DateTime @default(now())
+  waveform     String?      @db.VarChar(400)
+  createdAt    DateTime     @default(now())
+  // QA H4: set when this upload is someone's profile photo (kept by the sweeper).
+  avatarOf     UserProfile? @relation("UserAvatar")
 
   @@index([uploaderId, createdAt])
   @@index([taskId])

@@ -4,6 +4,7 @@ import request from 'supertest';
 import { AccountTier, Role } from '@prisma/client';
 import { app } from '../app';
 import { prisma } from '../lib/prisma';
+import { resetEmailDeliveryHealth } from '../lib/emailDelivery';
 
 // Random per-call identifiers instead of table truncation between tests —
 // simplest way to keep every test's data isolated when the whole suite
@@ -53,4 +54,23 @@ export const createTeamLead = async () => {
   const lead = await createAndLoginUser();
   await grantTier(lead.user.id, 'TEAM_LEAD');
   return lead;
+};
+
+/**
+ * QA C2: forgot-password answers 503 when no e-mail can be sent. Tests that
+ * replace utils/mailer with a mock and exercise the reset flow switch on FAKE
+ * Brevo settings around the calls (nothing is sent: the mailer is mocked, and
+ * tests/setup.ts refuses any request to the real Brevo API).
+ */
+export const withFakeEmailSettings = async <T>(fn: () => Promise<T>): Promise<T> => {
+  process.env.BREVO_API_KEY = 'test-brevo-key-not-real';
+  process.env.BREVO_FROM_EMAIL = 'noreply@example.test';
+  resetEmailDeliveryHealth();
+  try {
+    return await fn();
+  } finally {
+    process.env.BREVO_API_KEY = '';
+    process.env.BREVO_FROM_EMAIL = '';
+    resetEmailDeliveryHealth();
+  }
 };

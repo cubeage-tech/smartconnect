@@ -73,11 +73,12 @@ describe('Team Management (Stage 2)', () => {
     expect(row('Omar').getByText('Accepted')).toBeInTheDocument();
     expect(row('Lena').getByText('Expired')).toBeInTheDocument();
     expect(row('Kenji').getByText('Revoked')).toBeInTheDocument();
-    // Never activated: shown as awaiting activation, not as an admin suspension.
-    for (const name of ['Priya', 'Lena', 'Kenji']) {
-      expect(row(name).getByText('Awaiting activation')).toBeInTheDocument();
-      expect(row(name).queryByText('Deactivated')).not.toBeInTheDocument();
-    }
+    // Never activated: never shown as an admin suspension. Only a PENDING
+    // invitation can still be activated (QA L41: an expired or revoked one
+    // used to say "Revoked" and "Awaiting activation" at once).
+    for (const name of ['Priya', 'Lena', 'Kenji']) expect(row(name).queryByText('Deactivated')).not.toBeInTheDocument();
+    expect(row('Priya').getByText('Awaiting activation')).toBeInTheDocument();
+    for (const name of ['Lena', 'Kenji']) expect(row(name).queryByText('Awaiting activation')).not.toBeInTheDocument();
     expect(row('Omar').getByText('Active')).toBeInTheDocument();
     expect(row('Zara').getByText('Deactivated')).toBeInTheDocument();
     expect(row('Priya').getByText('priya@acme.io')).toBeInTheDocument();

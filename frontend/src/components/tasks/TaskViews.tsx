@@ -234,7 +234,7 @@ export const WorkloadView = ({ workspaceId, projectId, refreshKey }: { workspace
               <tr key={p.user.id} className="border-t border-line">
                 <td className="px-3 py-2">
                   <span className="inline-flex items-center gap-2 font-medium text-fg">
-                    <Avatar name={personName(p.user)} size="xs" />
+                    <Avatar name={personName(p.user)} userId={p.user.id} size="xs" />
                     {personName(p.user)}
                   </span>
                 </td>

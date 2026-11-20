@@ -7,6 +7,7 @@ import { PeopleDirectory } from './PeopleDirectory';
 
 vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn(), defaults: { headers: { common: {} } } } }));
 vi.mock('react-toastify', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'me', username: 'mia' } }) }));
 const api = vi.mocked(axios, true);
 
 const member = (id: string, username: string, extra: Record<string, unknown> = {}) => ({
@@ -106,18 +107,21 @@ describe('PeopleDirectory', () => {
 
 describe('ProfileSettingsModal', () => {
   it('loads and saves profile fields and the read-receipt preference', async () => {
-    api.get.mockResolvedValue({ data: { title: 'Engineer', bio: null, timezone: null, readReceiptsEnabled: true } });
+    api.get.mockResolvedValue({ data: { displayName: 'Mia Lee', avatarId: null, title: 'Engineer', bio: null, timezone: null, readReceiptsEnabled: true } });
     api.patch.mockImplementation(async (_url: string, body: unknown) => ({ data: body }));
     const onClose = vi.fn();
     render(<ProfileSettingsModal onClose={onClose} />);
 
     const title = await screen.findByDisplayValue('Engineer');
     fireEvent.change(title, { target: { value: 'Staff Engineer' } });
+    // QA H4: the display name is editable too.
+    fireEvent.change(screen.getByDisplayValue('Mia Lee'), { target: { value: 'Mia Lee-Park' } });
     fireEvent.click(screen.getByRole('checkbox', { name: /read receipts/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
       expect(api.patch).toHaveBeenCalledWith('/api/users/me/profile', {
+        displayName: 'Mia Lee-Park',
         title: 'Staff Engineer',
         bio: '',
         timezone: '',
@@ -128,7 +132,7 @@ describe('ProfileSettingsModal', () => {
   });
 
   it('closes on Escape (accessible dialog)', async () => {
-    api.get.mockResolvedValue({ data: { title: null, bio: null, timezone: null, readReceiptsEnabled: true } });
+    api.get.mockResolvedValue({ data: { displayName: null, avatarId: null, title: null, bio: null, timezone: null, readReceiptsEnabled: true } });
     const onClose = vi.fn();
     render(<ProfileSettingsModal onClose={onClose} />);
     await screen.findByRole('dialog', { name: 'Profile & preferences' });

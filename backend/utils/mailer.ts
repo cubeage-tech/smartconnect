@@ -1,4 +1,4 @@
-import { emailSettings, type EmailSettings } from '../lib/emailDelivery';
+import { EmailSendError, emailSettings, type EmailSettings } from '../lib/emailDelivery';
 
 // E-mail goes through Brevo's transactional HTTP API, over HTTPS — never SMTP:
 // Render's free tier silently blocks/times-out outbound SMTP (ports 587 and
@@ -21,7 +21,7 @@ interface OutgoingEmail {
   html: string;
   text?: string;
 }
-type SendResult = { data: { id?: string }; error: null } | { data: null; error: { message: string } };
+type SendResult = { data: { id?: string }; error: null } | { data: null; error: { message: string; status?: number } };
 
 /** Brevo's error answer in one line — HTTP status, Brevo's code and reason — never repeating the key. */
 const describeBrevoError = (status: number, body: unknown, apiKey: string) => {
@@ -52,7 +52,7 @@ const sendViaBrevo = async ({ apiKey, sender }: EmailSettings, email: OutgoingEm
       signal: controller.signal,
     });
     const body: unknown = await response.json().catch(() => null);
-    if (!response.ok) return { data: null, error: { message: describeBrevoError(response.status, body, apiKey) } };
+    if (!response.ok) return { data: null, error: { message: describeBrevoError(response.status, body, apiKey), status: response.status } };
     const messageId = (body as { messageId?: unknown } | null)?.messageId;
     return { data: { id: typeof messageId === 'string' ? messageId : undefined }, error: null };
   } catch (err) {
@@ -220,11 +220,16 @@ export const sendOtpEmail = async (to: string, code: string) => {
 
 // 3. Send Reset Password Email Function — used by both self-service
 // "forgot password" and the admin "force reset" action.
-export const sendResetPasswordEmail = async (to: string, resetLink: string) => {
+export type ResetEmailResult = { sent: true; messageId?: string } | { sent: false; reason: 'not_configured' };
+
+// QA C2: the result says what happened. "sent" means Brevo accepted the
+// message for delivery (its API cannot confirm the inbox); a refusal throws
+// EmailSendError instead of being reported as sent.
+export const sendResetPasswordEmail = async (to: string, resetLink: string): Promise<ResetEmailResult> => {
   const settings = emailSettings();
   if (!settings) {
     console.warn('E-mail delivery (Brevo) is not configured - reset email will not be sent');
-    return;
+    return { sent: false, reason: 'not_configured' };
   }
 
   const { data, error } = await sendViaBrevo(settings, {
@@ -243,8 +248,9 @@ export const sendResetPasswordEmail = async (to: string, resetLink: string) => {
 
   if (error) {
     console.error('Reset email error:', error.message);
-    throw new Error(error.message);
+    throw new EmailSendError(error.message, error.status === 401 || error.status === 403);
   }
 
-  console.log('Reset email sent:', data?.id);
+  console.log('Reset email accepted by Brevo:', data?.id);
+  return { sent: true, messageId: data?.id };
 };

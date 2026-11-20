@@ -234,14 +234,15 @@ export const TeamManagement = () => {
 
   return (
     <div className="h-full flex flex-col bg-surface-secondary p-4 sm:p-8 gap-6 overflow-y-auto">
+      {/* QA H5: the description takes the remaining width and wraps; the button keeps its size. */}
       <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-fg tracking-tight">Team Management</h1>
           <p className="text-sm text-fg-muted mt-1">
             Add Team Leads. Each one activates their own account with a single-use link and temporary password, then creates and runs their team's workspaces. Someone who already signed up can be made a Team Lead from the same form.
           </p>
         </div>
-        <Button icon={<UserPlus size={15} aria-hidden="true" />} onClick={() => setAdding(true)}>Add Team Lead</Button>
+        <Button icon={<UserPlus size={15} aria-hidden="true" />} onClick={() => setAdding(true)} className="shrink-0 self-start whitespace-nowrap lg:self-auto">Add Team Lead</Button>
       </header>
 
       {notice && (
@@ -267,8 +268,12 @@ export const TeamManagement = () => {
               const badge = invitation ? INVITATION_BADGE[invitation.status] : null;
               // T.21: provisioned accounts stay SUSPENDED until activation — show
               // that as "Awaiting activation", not as an admin suspension.
-              const awaitingActivation = lead.status === 'SUSPENDED' && !!invitation && invitation.status !== 'ACCEPTED';
-              const account = awaitingActivation ? { label: 'Awaiting activation', tone: 'neutral' as const } : ACCOUNT_BADGE[lead.status];
+              // QA L41: only a PENDING invitation can still be activated; for a
+              // revoked or expired one the invitation badge alone is the state
+              // (it used to show "Revoked" + "Awaiting activation").
+              const neverActivated = lead.status === 'SUSPENDED' && !!invitation && invitation.status !== 'ACCEPTED';
+              const awaitingActivation = neverActivated && invitation!.status === 'PENDING';
+              const account = awaitingActivation ? { label: 'Awaiting activation', tone: 'neutral' as const } : neverActivated ? null : ACCOUNT_BADGE[lead.status];
               const canReissue = invitation && (invitation.status === 'EXPIRED' || invitation.status === 'REVOKED');
               const canDeactivate = lead.status === 'ACTIVE';
               const canReactivate = lead.status === 'SUSPENDED' && hasActivated(lead);
@@ -282,7 +287,7 @@ export const TeamManagement = () => {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-fg truncate">{nameOf(lead)}</span>
                         {badge && <Badge tone={badge.tone}>{badge.label}</Badge>}
-                        <Badge tone={account.tone}>{account.label}</Badge>
+                        {account && <Badge tone={account.tone}>{account.label}</Badge>}
                       </div>
                       <div className="text-xs text-fg-muted truncate">{lead.loginId}</div>
                       <div className="text-xs text-fg-subtle">

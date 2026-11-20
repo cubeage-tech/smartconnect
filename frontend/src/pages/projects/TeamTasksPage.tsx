@@ -341,8 +341,9 @@ export const TeamTasksPage = () => {
                 <table className="w-full table-fixed text-sm" aria-label="Team tasks">
                   <thead>
                     <tr className="border-b border-line text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">
-                      <th scope="col" className="w-[31%] px-4 py-2">Task</th>
-                      <th scope="col" className="w-[16%] px-2 py-2">Assigned to</th>
+                      {/* QA L28: wider "Assigned to" so full names fit (it truncated while Task had room). */}
+                      <th scope="col" className="w-[26%] px-4 py-2">Task</th>
+                      <th scope="col" className="w-[21%] px-2 py-2">Assigned to</th>
                       <th scope="col" className="w-[10%] px-2 py-2">Priority</th>
                       <th scope="col" className="w-[11%] px-2 py-2">Due</th>
                       <th scope="col" className="w-[12%] px-2 py-2">Status</th>
@@ -362,7 +363,7 @@ export const TeamTasksPage = () => {
                         <td className="px-2 py-2.5">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <AssigneeAvatar user={t.assignee} />
-                            <span className="truncate text-fg">{personName(t.assignee)}</span>
+                            <span className="truncate text-fg" title={personName(t.assignee)}>{personName(t.assignee)}</span>
                           </span>
                         </td>
                         <td className="px-2 py-2.5">

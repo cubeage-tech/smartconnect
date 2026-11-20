@@ -1,3 +1,4 @@
+import { usePeopleDirectory } from '../../lib/people';
 import { CheckSquare, FileText, FolderKanban, Hash, Home, Inbox, Lock, MessageSquare, Search, Settings, User, Users, X } from 'lucide-react';
 import { KeyboardEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -38,11 +39,18 @@ const DEBOUNCE_MS = 200;
 
 interface CommandPaletteProps {
   workspaceId: string;
+  /**
+   * QA M7: the channels already in the sidebar, matched as you type — the
+   * server search takes seconds, and "gen" used to show nothing for General
+   * until it answered. Server results are merged in when they arrive.
+   */
+  channels?: { id: string; name?: string | null; isDM?: boolean; visibility?: string; archivedAt?: string | null }[];
   /** Opens a DM with a person (WorkspaceContext.startDM). */
   onMessagePerson: (userId: string) => Promise<void> | void;
 }
 
-export const CommandPalette = ({ workspaceId, onMessagePerson }: CommandPaletteProps) => {
+export const CommandPalette = ({ workspaceId, onMessagePerson, channels = [] }: CommandPaletteProps) => {
+  const people = usePeopleDirectory();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -139,13 +147,30 @@ export const CommandPalette = ({ workspaceId, onMessagePerson }: CommandPaletteP
     }
     const out: Item[] = [];
     const e = results.everything;
+    const ql = q.toLowerCase();
+    // QA M7: instant local matches (sidebar channels, people directory),
+    // followed by any the server finds that are not already listed.
+    const localChannels = channels.filter((c) => !c.isDM && (c.name ?? '').toLowerCase().includes(ql)).slice(0, 6);
+    const serverChannels = (e?.channels ?? []).filter((c) => !localChannels.some((l) => l.id === c.id));
+    const localPeople = [...people.values()].filter((p) => `${p.displayName ?? ''} ${p.username}`.toLowerCase().includes(ql)).slice(0, 6);
+    const serverPeople = (e?.people ?? []).filter((p) => !localPeople.some((l) => l.id === p.id));
     for (const t of e?.tasks ?? []) {
       out.push({ key: `t:${t.id}`, group: 'Tasks', icon: <CheckSquare size={16} />, label: `${t.identifier} ${t.title}`, hint: `${t.project?.name ?? ''} · ${t.status.replace('_', ' ').toLowerCase()}`, run: () => go(`${base}/projects/${t.projectId}?task=${t.id}`) });
     }
     for (const p of e?.projects ?? []) {
       out.push({ key: `p:${p.id}`, group: 'Projects', icon: <FolderKanban size={16} />, label: p.name, hint: p.archived ? 'Archived' : p.status.replace('_', ' ').toLowerCase(), run: () => go(`${base}/projects/${p.id}`) });
     }
-    for (const c of e?.channels ?? []) {
+    for (const c of localChannels) {
+      out.push({
+        key: `c:${c.id}`,
+        group: 'Channels',
+        icon: c.visibility === 'PRIVATE' ? <Lock size={16} /> : <Hash size={16} />,
+        label: c.name ?? 'channel',
+        hint: c.archivedAt ? 'Archived' : undefined,
+        run: () => go(`${base}/c/${c.id}`),
+      });
+    }
+    for (const c of serverChannels) {
       out.push({
         key: `c:${c.id}`,
         group: 'Channels',
@@ -155,7 +180,7 @@ export const CommandPalette = ({ workspaceId, onMessagePerson }: CommandPaletteP
         run: () => go(`${base}/c/${c.id}`),
       });
     }
-    for (const person of e?.people ?? []) {
+    for (const person of [...localPeople, ...serverPeople]) {
       out.push({
         key: `u:${person.id}`,
         group: 'People',
@@ -196,7 +221,7 @@ export const CommandPalette = ({ workspaceId, onMessagePerson }: CommandPaletteP
       });
     }
     return out;
-  }, [query, results, workspaceId, go, close, onMessagePerson]);
+  }, [query, results, workspaceId, go, close, onMessagePerson, channels, people]);
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -223,7 +248,7 @@ export const CommandPalette = ({ workspaceId, onMessagePerson }: CommandPaletteP
   const q = query.trim();
   let lastGroup = '';
   return createPortal(
-    <div className="fixed inset-0 z-[80] flex items-start justify-center bg-overlay px-4 pt-[12vh] backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+    <div className="fixed inset-0 z-[170] flex items-start justify-center bg-overlay px-4 pt-[12vh] backdrop-blur-sm" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div role="dialog" aria-modal="true" aria-label="Search and jump" className="w-full max-w-xl overflow-hidden rounded-2xl border border-line bg-surface-raised shadow-2xl">
         <div className="flex items-center gap-2 border-b border-line px-4">
           <Search size={18} className="shrink-0 text-fg-subtle" aria-hidden="true" />

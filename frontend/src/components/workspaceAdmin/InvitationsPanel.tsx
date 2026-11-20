@@ -218,7 +218,8 @@ export const InvitationsPanel = ({ workspaceId, emailInvitationsAvailable = true
                     <Badge tone={INVITATION_STATE_TONE[inv.state]}>{INVITATION_STATE_LABEL[inv.state]}</Badge>
                   </div>
                   <p className="text-xs text-fg-muted mt-0.5">
-                    Sent {formatDate(inv.createdAt)}
+                    {/* QA L38: "Invited", true whether or not an e-mail went out. */}
+                    Invited {formatDate(inv.createdAt)}
                     {inv.inviter ? ` by ${inv.inviter.username}` : ''}
                     {inv.state === 'pending' ? ` · expires ${formatDate(inv.expiresAt)}` : ''}
                   </p>

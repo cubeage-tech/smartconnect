@@ -25,6 +25,17 @@ router.get(
   }
 );
 
+// GET /api/me/unread-by-workspace — QA M12: unread totals for each of the
+// caller's workspaces (the workspace rail's "something is waiting" dots).
+router.get('/me/unread-by-workspace', ...requireSessionUser, async (req: WorkspaceScopedRequest, res: Response, next: NextFunction) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.json({ workspaces: await readStateService.getUnreadByWorkspace(req.user!.id) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /api/channels/:id/read { messageId? } — advance the caller's read
 // position (monotonic). Every tab/device of the caller is told the new
 // authoritative state; DM participants who share receipts get a receipt.

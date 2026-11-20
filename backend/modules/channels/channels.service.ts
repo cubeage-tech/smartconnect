@@ -90,6 +90,7 @@ export const listChannelsForUser = async (userId: string) => {
   const channels = await prisma.channel.findMany({
     where: { isDM: false, members: { some: { userId } }, ...projectChannelAccessWhere(userId) },
     include: channelListInclude,
+    orderBy: [{ name: 'asc' }, { id: 'asc' }], // QA L25: stable order
   });
   return channels;
 };
@@ -106,6 +107,9 @@ export const listChannelsForWorkspace = async (workspaceId: string, userId: stri
   const channels = await prisma.channel.findMany({
     where: { workspaceId, isDM: false, members: { some: { userId } }, ...projectChannelAccessWhere(userId) },
     include: channelListInclude,
+    // QA L25: a stable order (it had none, so Postgres could return the same
+    // channels in a different order on each load — desktop and phone differed).
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
   });
   return channels;
 };
@@ -195,7 +199,8 @@ const assertNotDirectMessage = (channel: { isDM: boolean }) => {
 export const listAllChannelsAdmin = () =>
   prisma.channel.findMany({
     where: { isDM: false },
-    include: { _count: { select: { members: true } } },
+    // QA M10: the workspace, so channels of the same name can be told apart.
+    include: { _count: { select: { members: true } }, workspace: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
   });
 

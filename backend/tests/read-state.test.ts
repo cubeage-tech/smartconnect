@@ -183,6 +183,9 @@ describe('profile & preferences', () => {
       .send({ title: 'Staff Engineer', bio: 'Builds things', timezone: 'Asia/Kolkata' });
     expect(ok.status).toBe(200);
     expect((await request(app).get('/api/users/me/profile').set(authHeader(token))).body).toEqual({
+      // QA H4: the profile also carries the display name and photo id.
+      displayName: null,
+      avatarId: null,
       title: 'Staff Engineer',
       bio: 'Builds things',
       timezone: 'Asia/Kolkata',

@@ -57,7 +57,7 @@ test('workspace invitations: new people sign up into the invited workspace; exis
     await page.waitForURL(/\/signup\?/);
     const form = SIGNUP_FORM(page);
     await expect(form.locator('input[type="email"]')).toHaveValue(newcomer.email.toLowerCase()); // invitations store the address normalized
-    await form.getByPlaceholder('Samarth Karale').fill(newcomer.username);
+    await form.getByLabel('Full name').fill(newcomer.username);
     await form.getByLabel('Password', { exact: true }).fill(newcomer.password);
     await form.getByLabel('Confirm password').fill(newcomer.password);
     await form.getByRole('button', { name: 'Create Account' }).click();

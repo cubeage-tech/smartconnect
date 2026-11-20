@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { acceptInvitationTo, API_URL, apiAs, createWorkspace, newUser, pageToken, signUp, trackPageErrors } from './helpers';
+import { acceptInvitationTo, API_URL, apiAs, createWorkspace, newUser, pageToken, signUp, trackPageErrors, signOut } from './helpers';
 
 /**
  * T.37 — several users side by side in ONE browser profile: three tabs of one
@@ -139,7 +139,7 @@ test('three users in three tabs of one browser profile: separate identities, req
 
   await test.step('7. Developer 1 signs out: only that session ends; the other two tabs stay signed in', async () => {
     await tabs.dev1.goto(`/${workspaceId}`);
-    await tabs.dev1.getByRole('button', { name: 'Sign out' }).first().click();
+    await signOut(tabs.dev1);
     await tabs.dev1.waitForURL(/\/login/);
     await expect(panel(tabs.dev1)).toContainText('This tab: signed out');
     await expect.poll(async () => (await apiAs(request, tokens.dev1).get('/api/auth/me')).status()).toBe(401); // revoked on the server

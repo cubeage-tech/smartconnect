@@ -103,6 +103,10 @@ describe('ChannelSettingsModal', () => {
     expect(onChanged).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /Archive channel/ }));
+    // QA L36: confirmed in the app's dialog, not window.confirm.
+    expect(api.post).not.toHaveBeenCalled();
+    const archiveDialog = await screen.findByRole('dialog', { name: /Archive #launch/ });
+    fireEvent.click(within(archiveDialog).getByRole('button', { name: 'Archive channel' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/channels/c1/archive'));
 
     fireEvent.click(screen.getByRole('tab', { name: /Members/ }));
@@ -112,9 +116,11 @@ describe('ChannelSettingsModal', () => {
     fireEvent.change(within(list).getByRole('combobox', { name: 'Role of alice' }), { target: { value: 'moderator' } });
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/channels/c1/members/u1', { role: 'moderator' }));
     fireEvent.click(within(list).getByRole('button', { name: 'Make bob the owner' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: /Make bob the channel owner/ })).getByRole('button', { name: 'Make owner' }));
     await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/api/channels/c1/members/u2', { role: 'admin' }));
     api.delete.mockResolvedValue({ data: {} });
     fireEvent.click(within(list).getByRole('button', { name: 'Remove alice' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: /Remove alice/ })).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/api/channels/c1/members/u1'));
   });
 
@@ -144,7 +150,7 @@ describe('CreateChannelModal', () => {
         <CreateChannelModal isOpen onClose={vi.fn()} />
       </MemoryRouter>
     );
-    fireEvent.change(screen.getByPlaceholderText('product-launch'), { target: { value: 'secret-plans' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g. Product launch'), { target: { value: 'secret-plans' } });
     fireEvent.click(screen.getByRole('radio', { name: /Private/ }));
     fireEvent.click(screen.getByRole('checkbox', { name: /Announcement channel/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Create Channel' }));

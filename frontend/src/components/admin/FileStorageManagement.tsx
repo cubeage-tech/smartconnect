@@ -1,5 +1,6 @@
+import { AdminPageHeader } from './AdminPageHeader';
 import axios from 'axios';
-import { AlertTriangle, File as FileIcon, Globe, Hash, HardDrive, Loader2, Lock, MessageSquareLock, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, File as FileIcon, Globe, Hash, Loader2, Lock, MessageSquareLock, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 import { Badge, Button, EmptyState, ErrorState, useConfirm } from '../ui';
@@ -137,22 +138,16 @@ export const FileStorageManagement = () => {
   return (
     <div className="flex h-full flex-col bg-surface-secondary p-4 sm:p-6 lg:p-8">
       {dialog}
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-3 text-xl font-semibold tracking-tight text-fg">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand">
-              <HardDrive size={18} aria-hidden="true" />
-            </span>
-            File storage
-          </h1>
-          <p className="mt-1.5 text-sm text-fg-muted tabular-nums">
-            {report ? `${report.totals.count} file${report.totals.count === 1 ? '' : 's'} · ${formatBytes(report.totals.bytes)} stored` : 'Loading…'}
-          </p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => void fetchFiles()} loading={loading} icon={<RefreshCw size={14} aria-hidden="true" />}>
-          Refresh
-        </Button>
-      </div>
+      {/* QA L42: the shared admin header. */}
+      <AdminPageHeader
+        title="File storage"
+        description={<span className="tabular-nums">{report ? `${report.totals.count} file${report.totals.count === 1 ? '' : 's'} · ${formatBytes(report.totals.bytes)} stored` : 'Loading…'}</span>}
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => void fetchFiles()} loading={loading} icon={<RefreshCw size={14} aria-hidden="true" />}>
+            Refresh
+          </Button>
+        }
+      />
 
       {report && report.warnings.length > 0 && (
         <div role="status" className="mb-4 flex gap-3 rounded-xl border border-warning/30 bg-warning-soft p-3 text-sm text-fg">

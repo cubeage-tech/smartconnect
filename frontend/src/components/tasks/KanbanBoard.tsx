@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowRight, ArrowUp, CheckSquare, Link2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react';
-import { DragEvent, KeyboardEvent, useRef, useState } from 'react';
+import { Loader2, ArrowDown, ArrowRight, ArrowUp, CheckSquare, Link2, MessageSquare, MoreHorizontal, Plus } from 'lucide-react';
+import { DragEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { STATUS_LABELS, TASK_STATUSES, TaskStatus, TaskView } from '../../lib/api/tasks';
 import { groupByStatus } from '../../lib/tasks/board';
 import { Menu, MenuItem } from '../ui';
@@ -29,6 +29,22 @@ export const KanbanBoard = ({ tasks, readOnly = false, canCreate = false, onOpen
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ status: TaskStatus; index: number } | null>(null);
   const columnRefs = useRef<Partial<Record<TaskStatus, HTMLOListElement | null>>>({});
+  // QA L32: seven columns rarely fit; a fade on the side with more columns
+  // shows the board scrolls (overlay scrollbars are invisible on macOS).
+  const boardRef = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState({ left: false, right: false });
+  const measure = useCallback(() => {
+    const el = boardRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 2;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    setMore((m) => (m.left === left && m.right === right ? m : { left, right }));
+  }, []);
+  useEffect(() => {
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [measure, tasks.length]);
 
   const indexAt = (status: TaskStatus, clientY: number) => {
     const list = columnRefs.current[status];
@@ -61,7 +77,10 @@ export const KanbanBoard = ({ tasks, readOnly = false, canCreate = false, onOpen
   };
 
   return (
-    <div className="flex h-full min-h-0 gap-3 overflow-x-auto pb-3" role="list" aria-label="Task board">
+    <div className="relative h-full min-h-0">
+    {more.left && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 bg-gradient-to-r from-surface-secondary to-transparent" />}
+    {more.right && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 bg-gradient-to-l from-surface-secondary to-transparent" />}
+    <div ref={boardRef} onScroll={measure} className="flex h-full min-h-0 gap-3 overflow-x-auto pb-3" role="list" aria-label="Task board">
       {TASK_STATUSES.map((status) => {
         const cards = columns[status];
         // Drop indexes count the column's cards without the one being dragged
@@ -124,6 +143,7 @@ export const KanbanBoard = ({ tasks, readOnly = false, canCreate = false, onOpen
           </section>
         );
       })}
+    </div>
     </div>
   );
 };
@@ -239,14 +259,20 @@ const QuickAdd = ({ status, onAdd }: { status: TaskStatus; onAdd: (status: TaskS
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
+  // QA M5: the title being added, shown at once as a placeholder card with a
+  // spinner (the request can take seconds); put back in the input if refused.
+  const [pending, setPending] = useState<string | null>(null);
 
   const submit = async () => {
     const value = title.trim();
     if (!value || busy) return;
     setBusy(true);
+    setPending(value);
+    setTitle('');
     const ok = await onAdd(status, value);
     setBusy(false);
-    if (ok) setTitle('');
+    setPending(null);
+    if (!ok) setTitle(value);
   };
 
   if (!open) {
@@ -285,6 +311,12 @@ const QuickAdd = ({ status, onAdd }: { status: TaskStatus; onAdd: (status: TaskS
         placeholder="Task title, then Enter"
         className="w-full rounded-lg border border-line bg-surface px-2.5 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle focus:border-brand focus:ring-2 focus:ring-brand-muted"
       />
+      {pending && (
+        <div role="status" className="mt-2 flex items-center gap-2 rounded-lg border border-dashed border-line bg-surface px-2.5 py-2 text-sm text-fg-muted">
+          <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />
+          <span className="min-w-0 truncate">Adding “{pending}”…</span>
+        </div>
+      )}
     </form>
   );
 };

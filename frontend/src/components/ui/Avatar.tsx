@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react';
+import { initialsOf, useAvatarUrl, usePerson } from '../../lib/people';
+
 /**
- * Initial-based avatar (T.32 design system). Each person gets a stable,
- * muted colour derived from their name, so a conversation is scannable at a
+ * Initial-based avatar (T.32 design system), or the person's photo (QA H4).
+ * Each person gets a stable, muted colour derived from their id (QA L9; from
+ * the name when no id is known), so a conversation is scannable at a
  * glance without the same gradient on everyone. White text on every swatch
  * meets 4.5:1. Optional presence dot with a ring in the surface colour; the
  * presence is also given as text for assistive technology.
@@ -16,7 +20,7 @@ const hash = (value: string) => {
 export const avatarColor = (name: string | null | undefined) => SWATCHES[hash(name || '?') % SWATCHES.length];
 
 const SIZES = {
-  xs: 'h-5 w-5 text-[10px] rounded-md',
+  xs: 'h-5 w-5 text-[9px] tracking-tight rounded-md', // QA L8: two letters fit at 20px
   sm: 'h-7 w-7 text-xs rounded-md',
   md: 'h-9 w-9 text-sm rounded-lg',
   lg: 'h-11 w-11 text-base rounded-xl',
@@ -26,32 +30,53 @@ export type Presence = 'online' | 'away' | 'offline';
 
 export const Avatar = ({
   name,
+  userId,
+  avatarId,
   size = 'md',
   presence,
-  initials = 1,
   className = '',
 }: {
   name: string | null | undefined;
+  /**
+   * QA L9: the person's id. Their colour is derived from it, so the same
+   * person has the same colour on every screen whichever name string a screen
+   * has; it also finds their photo in the people directory (QA H4).
+   */
+  userId?: string | null;
+  /** QA H4: the photo id when the screen already has it (else looked up by userId). */
+  avatarId?: string | null;
   size?: keyof typeof SIZES;
   presence?: Presence;
-  /** How many leading characters to show (1, or 2 for the account button). */
+  /** @deprecated QA L8: initials are now the same everywhere (two letters at every size). */
   initials?: 1 | 2;
   className?: string;
-}) => (
-  <span className={`relative inline-flex shrink-0 ${className}`}>
-    <span
-      aria-hidden="true"
-      className={`flex select-none items-center justify-center font-semibold uppercase text-white ${SIZES[size]}`}
-      style={{ backgroundColor: avatarColor(name) }}
-    >
-      {((name || '?').trim().slice(0, initials) || '?').toUpperCase()}
+}) => {
+  const known = usePerson(userId);
+  const photoId = avatarId ?? known?.avatarId ?? null;
+  const photo = useAvatarUrl(userId, photoId);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [photo]);
+  const shown = photo && !broken;
+  return (
+    <span className={`relative inline-flex shrink-0 ${className}`}>
+      {shown ? (
+        <img src={photo} alt="" aria-hidden="true" onError={() => setBroken(true)} className={`object-cover ${SIZES[size]}`} />
+      ) : (
+        <span
+          aria-hidden="true"
+          className={`flex select-none items-center justify-center font-semibold uppercase text-white ${SIZES[size]}`}
+          style={{ backgroundColor: avatarColor(userId || name) }}
+        >
+          {initialsOf(name)}
+        </span>
+      )}
+      {presence && presence !== 'offline' && (
+        <span
+          className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-surface ${presence === 'online' ? 'bg-presence-online' : 'bg-presence-away'}`}
+          aria-hidden="true"
+        />
+      )}
+      {presence && <span className="sr-only">{presence === 'online' ? 'online' : presence === 'away' ? 'away' : 'offline'}</span>}
     </span>
-    {presence && presence !== 'offline' && (
-      <span
-        className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-surface ${presence === 'online' ? 'bg-presence-online' : 'bg-presence-away'}`}
-        aria-hidden="true"
-      />
-    )}
-    {presence && <span className="sr-only">{presence === 'online' ? 'online' : presence === 'away' ? 'away' : 'offline'}</span>}
-  </span>
-);
+  );
+};

@@ -1,3 +1,4 @@
+import { PHONE_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatDistanceToNow } from 'date-fns';
 import { Search, X } from 'lucide-react';
 import { KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
@@ -46,6 +47,7 @@ interface ChannelSearchProps {
 }
 
 export const ChannelSearch = ({ scope, workspace = null, onOpenResult }: ChannelSearchProps) => {
+  const phone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Hit[] | null>(null);
   const [everywhere, setEverywhere] = useState(false);
@@ -203,8 +205,9 @@ export const ChannelSearch = ({ scope, workspace = null, onOpenResult }: Channel
         }}
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
-        placeholder={scopeLabel ? `Search messages in ${scopeLabel}` : 'Open a channel or conversation to search it'}
-        className="w-full h-8 bg-white/[0.07] border border-white/[0.08] focus:border-accent-400/60 focus:bg-white/[0.11] rounded-lg pl-8 md:pl-9 pr-14 text-[13px] text-sidebar-fg placeholder:text-sidebar-fg-muted outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-search-cancel-button]:hidden"
+        // QA L24: short on phones, and long placeholders end in "…" instead of being cut mid-word.
+        placeholder={scopeLabel ? (phone ? 'Search messages' : `Search messages in ${scopeLabel}`) : 'Open a channel or conversation to search it'}
+        className="text-ellipsis w-full h-8 bg-white/[0.07] border border-white/[0.08] focus:border-accent-400/60 focus:bg-white/[0.11] rounded-lg pl-8 md:pl-9 pr-14 text-[13px] text-sidebar-fg placeholder:text-sidebar-fg-muted outline-none transition-colors disabled:opacity-60 disabled:cursor-not-allowed [&::-webkit-search-cancel-button]:hidden"
       />
       {!query && (
         <kbd aria-hidden="true" className="pointer-events-none absolute right-3 md:right-5 top-1/2 hidden -translate-y-1/2 rounded border border-white/10 px-1.5 py-px font-sans text-[10px] text-sidebar-fg-muted sm:block">

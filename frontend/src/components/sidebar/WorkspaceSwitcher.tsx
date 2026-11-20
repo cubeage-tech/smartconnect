@@ -1,8 +1,10 @@
+import axios from 'axios';
 import { Building2, Globe, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMatch, useNavigate, useParams } from 'react-router-dom';
 import { useHierarchy } from '../../hooks/useHierarchy';
 import { groupWorkspacesByAccess } from '../../lib/adminAccess';
+import { OTHER_WORKSPACE_MESSAGE } from '../../lib/workspaceEvents';
 import { useWorkspaces } from '../../pages/workspace/WorkspacesProvider';
 import { useSwitchWorkspace } from '../../pages/workspace/useWorkspaceActions';
 import { CreateWorkspaceModal } from './CreateWorkspaceModal';
@@ -33,6 +35,36 @@ export const WorkspaceSwitcher = () => {
   const { switchTo, dialog } = useSwitchWorkspace();
   // P2: SmartConnect Collab, then My workspaces, then Shared with me.
   const groups = groupWorkspacesByAccess(workspaces);
+
+  // QA M12: which other workspaces have unread messages (a DM there used to
+  // be invisible until you switched in). Refreshed on switch, on focus, when
+  // WorkspaceLayout sees a message for another workspace, and every 45 s.
+  const [unreadBy, setUnreadBy] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let alive = true;
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const load = () => {
+      axios
+        .get<{ workspaces: { workspaceId: string; unread: number }[] }>('/api/me/unread-by-workspace')
+        .then((res) => alive && setUnreadBy(Object.fromEntries(res.data.workspaces.map((w) => [w.workspaceId, w.unread]))))
+        .catch((err) => console.warn('Could not load unread workspaces:', err));
+    };
+    const soon = () => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(load, 1500);
+    };
+    load();
+    const timer = setInterval(load, 45_000);
+    window.addEventListener('focus', load);
+    window.addEventListener(OTHER_WORKSPACE_MESSAGE, soon);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      if (pending) clearTimeout(pending);
+      window.removeEventListener('focus', load);
+      window.removeEventListener(OTHER_WORKSPACE_MESSAGE, soon);
+    };
+  }, [activeWorkspaceId]);
 
   // The POST response lacks roles/capabilities — reload the authoritative list.
   const handleCreated = () => {
@@ -65,10 +97,13 @@ export const WorkspaceSwitcher = () => {
                     isActive ? 'h-7' : 'h-0 group-hover:h-2'
                   }`}
                 />
+                {!isActive && (unreadBy[ws.id] ?? 0) > 0 && (
+                  <span aria-hidden="true" className="pointer-events-none absolute right-2 top-0 z-10 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-sidebar" />
+                )}
                 <button
                   onClick={() => switchTo(ws.id)}
-                  title={tooltip}
-                  aria-label={`${name}${isActive ? ' (current workspace)' : ''}`}
+                  title={!isActive && (unreadBy[ws.id] ?? 0) > 0 ? `${tooltip} — unread messages` : tooltip}
+                  aria-label={`${name}${isActive ? ' (current workspace)' : ''}${!isActive && (unreadBy[ws.id] ?? 0) > 0 ? ' (unread messages)' : ''}`}
                   aria-current={isActive ? 'page' : undefined}
                   className={`w-10 h-10 rounded-xl flex items-center justify-center font-semibold text-[15px] shrink-0 transition-colors active:scale-95 ${
                     isActive

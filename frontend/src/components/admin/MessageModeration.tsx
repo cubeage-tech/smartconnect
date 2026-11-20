@@ -1,14 +1,19 @@
+import { AdminPageHeader } from './AdminPageHeader';
 import axios from 'axios';
-import { FileText, Hash, Loader2, MessageSquareOff, Search, Trash2 } from 'lucide-react';
+import { FileText, Hash, Loader2, Search, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { displayNameOf } from '../../lib/people';
+import { sanitizeMessageHtml } from '../../lib/sanitizeHtml';
+import { Avatar } from '../ui/Avatar';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface SearchResultMessage {
   id: string;
   content: string | null;
   fileName: string | null;
   createdAt: string;
-  sender: { id: string; username: string };
-  channel: { id: string; name: string | null };
+  sender: { id: string; username: string; profile?: { displayName: string | null } | null };
+  channel: { id: string; name: string | null; workspace?: { id: string; name: string } | null };
 }
 
 export const MessageModeration = () => {
@@ -19,6 +24,8 @@ export const MessageModeration = () => {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // QA L36: the app's own confirmation dialog, not the browser's confirm().
+  const [confirming, setConfirming] = useState<SearchResultMessage | null>(null);
 
   const flash = (setter: (v: string | null) => void, text: string) => {
     setter(text);
@@ -42,7 +49,7 @@ export const MessageModeration = () => {
   };
 
   const handleDelete = async (message: SearchResultMessage) => {
-    if (!confirm(`Delete this message from #${message.channel.name ?? 'channel'}? This will remove it for everyone instantly.`)) return;
+    setConfirming(null);
     setDeletingId(message.id);
     try {
       await axios.delete(`/api/admin/messages/${message.id}`);
@@ -57,17 +64,7 @@ export const MessageModeration = () => {
 
   return (
     <div className="p-8 h-full flex flex-col bg-gray-50">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-          <div className="p-2 bg-violet-100 rounded-lg">
-            <MessageSquareOff className="text-violet-600" size={28} />
-          </div>
-          Content Moderation
-        </h1>
-        <p className="text-gray-600 font-medium text-sm mt-2">
-          Search every channel for a message and remove it instantly — direct messages are never included.
-        </p>
-      </div>
+      <AdminPageHeader title="Content Moderation" description="Search every channel for a message and remove it instantly — direct messages are never included." />
 
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg font-medium">{error}</div>
@@ -115,18 +112,20 @@ export const MessageModeration = () => {
             <div className="divide-y divide-gray-100">
               {results.map((m) => (
                 <div key={m.id} className="px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors group">
-                  <div className="w-9 h-9 rounded-lg bg-accent-600 flex items-center justify-center text-white text-xs font-semibold uppercase shrink-0 mt-0.5">
-                    {m.sender.username[0] || '?'}
-                  </div>
+                  <Avatar name={displayNameOf({ username: m.sender.username, displayName: m.sender.profile?.displayName })} userId={m.sender.id} size="md" className="mt-0.5" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="text-sm font-bold text-gray-900">{m.sender.username}</span>
+                      <span className="text-sm font-bold text-gray-900">{displayNameOf({ username: m.sender.username, displayName: m.sender.profile?.displayName })}</span>
+                      {/* QA H6: which workspace's channel (several are called "General"). */}
                       <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider bg-gray-100 text-gray-600 border border-gray-200 flex items-center gap-1">
-                        <Hash size={10} /> {m.channel.name ?? 'unknown'}
+                        {m.channel.workspace?.name && <>{m.channel.workspace.name} ›</>} <Hash size={10} aria-hidden="true" /> {m.channel.name ?? 'unknown'}
                       </span>
                     </div>
                     {m.content ? (
-                      <p className="text-sm text-gray-700">{m.content}</p>
+                      // QA H6: the message as people saw it — rendered through the
+                      // same sanitizer as the chat (formatting kept, nothing
+                      // unsafe), never the stored markup as text.
+                      <div className="rich-text text-sm text-gray-700 break-words line-clamp-6" dangerouslySetInnerHTML={{ __html: sanitizeMessageHtml(m.content) }} />
                     ) : (
                       <p className="text-sm text-gray-400 italic flex items-center gap-1.5">
                         <FileText size={13} /> {m.fileName ? `Attachment: ${m.fileName}` : 'No text content'}
@@ -138,10 +137,12 @@ export const MessageModeration = () => {
                       {new Date(m.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     </span>
                     <button
-                      onClick={() => handleDelete(m)}
+                      type="button"
+                      onClick={() => setConfirming(m)}
                       disabled={deletingId === m.id}
                       className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all disabled:opacity-50"
                       title="Delete message"
+                      aria-label="Delete message"
                     >
                       {deletingId === m.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
                     </button>
@@ -152,6 +153,16 @@ export const MessageModeration = () => {
           )}
         </div>
       </div>
+      {confirming && (
+        <ConfirmDialog
+          title="Delete message?"
+          message={`This removes the message from #${confirming.channel.name ?? 'channel'} for everyone, instantly.`}
+          confirmLabel="Delete"
+          tone="danger"
+          onConfirm={() => handleDelete(confirming)}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
     </div>
   );
 };

@@ -1,9 +1,18 @@
 import axios from 'axios';
-import { Loader2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { ImagePlus, Loader2, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
+import { useAuth } from '../../contexts/AuthContext';
+import { displayNameOf, updatePerson } from '../../lib/people';
 import { UserProfileSettings } from '../../types';
+import { Avatar } from '../ui/Avatar';
 import { Modal } from '../ui/Modal';
+
+/** QA H4: what the server accepts as a profile photo (users.service.ts). */
+const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+export const photoProblem = (file: { type: string; size: number }) =>
+  !PHOTO_TYPES.includes(file.type) ? 'Choose a JPEG, PNG, WebP or GIF image.' : file.size > PHOTO_MAX_BYTES ? 'Choose an image of 5 MB or less.' : null;
 
 interface ProfileSettingsModalProps {
   onClose: () => void;
@@ -19,14 +28,35 @@ const timeZones = (): string[] => {
 };
 
 /**
- * Collaboration profile (title, bio, time zone) and preferences (read
- * receipts). Account credentials are intentionally not editable here.
+ * Profile (QA H4: display name and photo; title, bio, time zone) and
+ * preferences (read receipts). Login credentials (e-mail, username, password)
+ * are intentionally not editable here.
  */
 export const ProfileSettingsModal = ({ onClose }: ProfileSettingsModalProps) => {
+  const { user } = useAuth();
   const [form, setForm] = useState<UserProfileSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const zones = useMemo(timeZones, []);
+  // QA H4: a newly chosen photo, uploaded on Save; `removePhoto` clears the current one.
+  const [photo, setPhoto] = useState<{ file: File; preview: string } | null>(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => () => {
+    if (photo) URL.revokeObjectURL(photo.preview);
+  }, [photo]);
+
+  const choosePhoto = (file: File | undefined) => {
+    if (!file) return;
+    const problem = photoProblem(file);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setError(null);
+    setRemovePhoto(false);
+    setPhoto({ file, preview: URL.createObjectURL(file) });
+  };
 
   useEffect(() => {
     axios
@@ -43,13 +73,26 @@ export const ProfileSettingsModal = ({ onClose }: ProfileSettingsModalProps) => 
     setSaving(true);
     setError(null);
     try {
+      let avatarId: string | null | undefined;
+      if (photo) {
+        const body = new FormData();
+        body.append('attachment', photo.file);
+        const uploaded = await axios.post<{ id: string }>('/api/upload', body);
+        avatarId = uploaded.data.id;
+      } else if (removePhoto) {
+        avatarId = null;
+      }
       const res = await axios.patch<UserProfileSettings>('/api/users/me/profile', {
+        displayName: form.displayName ?? '',
         title: form.title ?? '',
         bio: form.bio ?? '',
         timezone: form.timezone ?? '',
         readReceiptsEnabled: form.readReceiptsEnabled,
+        ...(avatarId !== undefined ? { avatarId } : {}),
       });
       setForm(res.data);
+      // Every screen shows the new name, title and photo at once (lib/people).
+      if (user) updatePerson(user.id, { displayName: res.data.displayName, title: res.data.title, avatarId: res.data.avatarId });
       toast.success('Profile saved');
       onClose();
     } catch (err: unknown) {
@@ -94,6 +137,53 @@ export const ProfileSettingsModal = ({ onClose }: ProfileSettingsModalProps) => 
       )}
       {form && (
         <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            {photo ? (
+              <img src={photo.preview} alt="New profile photo" className="h-14 w-14 rounded-xl object-cover" />
+            ) : (
+              <Avatar name={displayNameOf({ username: user?.username, displayName: form.displayName })} userId={user?.id} avatarId={removePhoto ? null : form.avatarId} size="lg" />
+            )}
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={fileRef}
+                type="file"
+                accept={PHOTO_TYPES.join(',')}
+                className="sr-only"
+                id="profile-photo"
+                onChange={(e) => {
+                  choosePhoto(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+              <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-sm font-semibold text-fg hover:bg-surface-secondary">
+                <ImagePlus size={15} aria-hidden="true" /> {form.avatarId || photo ? 'Change photo' : 'Add photo'}
+              </button>
+              {(photo || (form.avatarId && !removePhoto)) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoto(null);
+                    setRemovePhoto(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold text-fg-muted hover:bg-surface-secondary"
+                >
+                  <Trash2 size={15} aria-hidden="true" /> Remove photo
+                </button>
+              )}
+            </div>
+          </div>
+          <label className="block">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Name</span>
+            <input
+              value={form.displayName ?? ''}
+              onChange={(e) => update('displayName', e.target.value)}
+              maxLength={80}
+              autoComplete="name"
+              placeholder={user?.username}
+              className={inputClass}
+            />
+            <span className="mt-1 block text-xs text-gray-500">Shown to people in your workspaces. Your username stays @{user?.username}.</span>
+          </label>
           <label className="block">
             <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Title</span>
             <input value={form.title ?? ''} onChange={(e) => update('title', e.target.value)} maxLength={80} placeholder="e.g. Product Designer" className={inputClass} />

@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../lib/prisma';
+import { credentialSetting } from '../config/env';
+import { checkStorageCredentials, reportStorageCredentials } from '../lib/cloudinary';
 import { handleUploadErrors } from '../modules/uploads/message.routes';
 import { uniqueEmail, uniqueUsername } from './helpers';
 import { freePort, ServerProcess, startServerProcess } from './server-process';
@@ -22,6 +24,7 @@ import { freePort, ServerProcess, startServerProcess } from './server-process';
 
 const NOT_CONFIGURED = 'File uploads are not available on this server right now. Your file was not sent.';
 const UNAVAILABLE = 'File storage is temporarily unavailable. Your file was not sent — please try again.';
+const QUOTA = 'File storage has reached its usage limit for now. Your file was not sent — please try again later.';
 
 const run = (err: unknown) => {
   const headers: Record<string, string> = {};
@@ -49,11 +52,10 @@ describe('T.35 — upload errors: storage problems are 503, file problems stay 4
     }
   });
 
-  it('storage outages, rate limits, timeouts and network failures are a 503 "try again" with Retry-After', () => {
+  it('storage outages, timeouts and network failures are a 503 "try again" with Retry-After', () => {
     const cases: unknown[] = [
       { message: 'Server returned unexpected status code - 502', http_code: 502, name: 'UnexpectedResponse' },
       { message: 'Internal error', http_code: 500, name: 'Error' },
-      { message: 'Rate Limit Exceeded', http_code: 420, name: 'Error' },
       { message: 'Request Timeout', http_code: 499, name: 'TimeoutError' },
       Object.assign(new Error('connect ECONNREFUSED 104.18.0.1:443'), { code: 'ECONNREFUSED' }),
       Object.assign(new Error('getaddrinfo ENOTFOUND api.cloudinary.com'), { code: 'ENOTFOUND' }),
@@ -65,6 +67,16 @@ describe('T.35 — upload errors: storage problems are 503, file problems stay 4
       expect(out.body).toEqual({ success: false, message: UNAVAILABLE });
       expect(out.headers['retry-after']).toMatch(/^\d+$/);
       expect(JSON.stringify(out.body)).not.toMatch(/ECONN|ENOTFOUND|104\.18|cloudinary|status code/i);
+    }
+  });
+
+  it('QA C1: a storage usage/rate limit (420, 429) is its own 503 with Retry-After, not an outage', () => {
+    for (const err of [{ message: 'Rate Limit Exceeded', http_code: 420, name: 'Error' }, { error: { message: 'Too many requests', http_code: 429 } }]) {
+      const out = run(err);
+      expect(out.status).toBe(503);
+      expect(out.body).toEqual({ success: false, message: QUOTA });
+      expect(out.headers['retry-after']).toBe('300');
+      expect(JSON.stringify(out.body)).not.toMatch(/Rate Limit|Too many|cloudinary/i);
     }
   });
 
@@ -155,4 +167,36 @@ describe('T.35 — real server, real SDK: what the user sees when storage refuse
     expect(res.headers.get('retry-after')).toMatch(/^\d+$/);
     expect(await res.json()).toEqual({ success: false, message: UNAVAILABLE });
   }, 30_000);
+});
+
+describe('QA C1 — storage credentials: pasted values are cleaned, and startup names a rejection', () => {
+  it('credentialSetting trims whitespace and one pair of matching quotes, and treats blank as missing', () => {
+    expect(credentialSetting('  my-cloud\n')).toBe('my-cloud');
+    expect(credentialSetting('"abc123"')).toBe('abc123');
+    expect(credentialSetting("'abc123' ")).toBe('abc123');
+    expect(credentialSetting('"abc\'')).toBe('"abc\'');
+    expect(credentialSetting('   ')).toBeUndefined();
+    expect(credentialSetting(undefined)).toBeUndefined();
+  });
+
+  it('checkStorageCredentials classifies the ping outcome without throwing', async () => {
+    expect(await checkStorageCredentials(async () => ({ status: 'ok' }))).toBe('ok');
+    expect(await checkStorageCredentials(async () => Promise.reject({ error: { message: 'Invalid api_key 123', http_code: 401 } }))).toBe('credentials_rejected');
+    expect(await checkStorageCredentials(async () => Promise.reject({ error: { http_code: 404 } }))).toBe('credentials_rejected');
+    expect(await checkStorageCredentials(async () => Promise.reject({ error: { http_code: 420 } }))).toBe('quota');
+    expect(await checkStorageCredentials(async () => Promise.reject(Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })))).toBe('unreachable');
+  });
+
+  it('reportStorageCredentials logs variable names only, never values', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    expect(await reportStorageCredentials(async () => 'credentials_rejected')).toBe('credentials_rejected');
+    const line = String(err.mock.calls[0]?.[0]);
+    expect(line).toMatch(/CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET/);
+    expect(line).not.toContain(String(process.env.CLOUDINARY_API_SECRET));
+    expect(await reportStorageCredentials(async () => 'ok')).toBe('ok');
+    expect(String(log.mock.calls.at(-1)?.[0])).toMatch(/accepted/);
+    err.mockRestore();
+    log.mockRestore();
+  });
 });

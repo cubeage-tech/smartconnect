@@ -249,7 +249,13 @@ describe('Brevo transactional e-mail API', () => {
     const fetchMock = stubBrevo();
     const { sendAccountInvitationEmail, sendInviteEmail, sendOtpEmail, sendResetPasswordEmail } = await import('../utils/mailer');
     await expect(sendInviteEmail('sam@example.com', inviteLink, 'Design')).resolves.toEqual({ success: false, message: 'Email service not configured' });
-    await expect(sendResetPasswordEmail('sam@example.com', 'https://app.example/reset-password?token=t&id=i')).resolves.toBeUndefined();
+    // QA C2: the reset e-mail used to resolve to undefined here — indistinguishable
+    // from a send, so forgot-password told people "sent" while nothing was. It now
+    // says it was not sent (and still sends nothing: fetchMock below).
+    await expect(sendResetPasswordEmail('sam@example.com', 'https://app.example/reset-password?token=t&id=i')).resolves.toEqual({
+      sent: false,
+      reason: 'not_configured',
+    });
     await expect(sendAccountInvitationEmail(account)).rejects.toThrow('Email service is not configured.');
     await expect(sendOtpEmail('sam@example.com', '123456')).rejects.toThrow(/not configured/);
     expect(fetchMock).not.toHaveBeenCalled();

@@ -1,4 +1,5 @@
-import { Bell, Building2, ChevronDown, ClipboardList, FolderKanban, Hash, Home, LayoutGrid, ListChecks, Lock, LogOut, MessageSquare, MoreHorizontal, Plus, Settings, Trash2, UserRoundX, Users } from 'lucide-react';
+import { nameIn, usePeopleDirectory, usePersonName } from '../../lib/people';
+import { Archive, Bell, Building2, ChevronDown, ClipboardList, FolderKanban, Hash, Home, LayoutGrid, ListChecks, Lock, MessageSquare, MoreHorizontal, Plus, Settings, Trash2, UserRoundX, Users } from 'lucide-react';
 import { useHierarchy } from '../../hooks/useHierarchy';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -25,7 +26,10 @@ export const Sidebar = ({
   activeView,
   onViewChange,
 }: any) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  // QA H4 / L8: your display name and the same avatar everywhere.
+  const myName = usePersonName(user);
+  const people = usePeopleDirectory();
   const { workspaceId, startDM, upsertDM } = useWorkspace();
   const navigate = useNavigate();
   const [composing, setComposing] = useState(false);
@@ -140,15 +144,9 @@ export const Sidebar = ({
               />
             )}
           </div>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); logout(); }}
-            className="p-1.5 rounded-md transition-colors text-sidebar-fg-muted hover:bg-sidebar-hover hover:text-sidebar-fg"
-            title="Sign out"
-            aria-label="Sign out"
-          >
-            <LogOut size={15} aria-hidden="true" />
-          </button>
+          {/* QA M17: no one-click "Sign out" next to the workspace name (it was
+              easy to hit by mistake); Sign out lives in the account menu
+              (header) and on the More tab (phones). */}
         </div>
 
         {showWorkspaceMenu && hasWorkspaceActions && (
@@ -301,10 +299,9 @@ export const Sidebar = ({
                         <Hash size={15} className="text-sidebar-fg-muted" aria-hidden="true" />
                       )}
                     </span>
-                    <span className="truncate flex-1">{ch.name}</span>
-
-
-
+                    <span className={`truncate flex-1 ${ch.archivedAt ? 'italic opacity-70' : ''}`}>{ch.name}</span>
+                    {/* QA L37: an archived channel stays listed only while it is open — marked as such. */}
+                    {ch.archivedAt && <Archive size={12} className="shrink-0 text-sidebar-fg-muted" aria-label="Archived" />}
                     {unreadCount > 0 && !isActive && (
                       <span className="min-w-[18px] px-1 h-[18px] bg-danger text-white text-[10px] font-semibold tabular-nums rounded-full flex items-center justify-center ml-1">
                         {formatUnread(unreadCount)}
@@ -318,18 +315,19 @@ export const Sidebar = ({
         </div>
 
         {/* Direct Messages Section */}
-        <div className="mb-4">
-          <div className="flex items-center group px-3 mb-1 h-8">
+        {/* QA L22: same spacing as the Channels section, so rows and badges line up. */}
+        <div className="mb-5">
+          <div className="flex items-center group px-2 mb-2 h-9">
             <button
               onClick={() => setCollapsedDMs(!collapsedDMs)}
-              className="p-1 hover:bg-sidebar-hover rounded transition-colors"
+              className="p-1.5 hover:bg-sidebar-hover rounded-lg transition-all"
             >
               <ChevronDown size={12} className={`text-sidebar-fg-muted transition-transform ${collapsedDMs ? '-rotate-90' : ''}`} />
             </button>
-            <span className="text-[12px] font-medium text-sidebar-fg-muted flex-1 px-1 cursor-default">Direct Messages</span>
+            <span className="text-[12px] font-medium text-sidebar-fg-muted flex-1 px-1.5 cursor-default">Direct Messages</span>
             <button
               onClick={() => setComposing(true)}
-              className="p-1 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-sidebar-hover rounded transition-all text-sidebar-fg-muted hover:text-white"
+              className="p-1.5 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-sidebar-hover rounded-lg transition-all text-sidebar-fg-muted hover:text-white"
               title="Start a new conversation"
               aria-label="Start a new conversation"
             >
@@ -338,7 +336,7 @@ export const Sidebar = ({
           </div>
 
           {!collapsedDMs && (
-            <div className="px-3 space-y-0.5" role="group" aria-label="Direct messages">
+            <div className="space-y-0.5" role="group" aria-label="Direct messages">
               {/* Only real, already-started conversations — a DM channel row
                   only ever exists because someone explicitly clicked
                   "Message" on another person (see findOrCreateDM), so there's
@@ -352,6 +350,8 @@ export const Sidebar = ({
                 const userOnlineData = isGroup ? undefined : onlineUsers.find((ou: any) => ou.id === dm.otherUserId);
                 const isOnline = !!userOnlineData;
                 const isBusy = isBusyStatus(userOnlineData?.status);
+                // QA H4: a 1:1 DM is labelled with the other person's display name.
+                const dmName = isGroup ? dm.name : nameIn(people, { id: dm.otherUserId, username: dm.name }, dm.name);
 
                 return (
                   // T.32: a real button (keyboard and screen readers), with presence as text too.
@@ -363,7 +363,7 @@ export const Sidebar = ({
                       onSelectChannel(dm);
                     }}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`w-full text-left flex items-center gap-2 px-2.5 py-1 max-lg:min-h-11 max-lg:text-sm text-[13px] rounded-md transition-colors group/dm ${
+                    className={`w-full text-left flex items-center gap-2 px-2.5 py-1.5 max-lg:min-h-11 max-lg:text-sm text-[13px] rounded-md transition-colors group/dm ${
                       isActive ? 'bg-sidebar-active' : 'hover:bg-sidebar-hover'
                     }`}
                   >
@@ -373,7 +373,7 @@ export const Sidebar = ({
                           <Users size={12} />
                         </div>
                       ) : (
-                        <Avatar name={dm.name} size="xs" />
+                        <Avatar name={dmName} userId={dm.otherUserId} size="xs" />
                       )}
                       {!isGroup && (
                         <span
@@ -385,7 +385,7 @@ export const Sidebar = ({
                       )}
                       {!isGroup && <span className="sr-only">{isBusy ? '(in a meeting)' : isOnline ? '(online)' : '(offline)'}</span>}
                     </div>
-                    <span className={`truncate flex-1 ${unreadCount > 0 ? 'font-semibold text-white' : isActive ? 'font-medium text-white' : 'text-sidebar-fg-muted group-hover/dm:text-sidebar-fg'}`}>{dm.name}</span>
+                    <span className={`truncate flex-1 ${unreadCount > 0 ? 'font-semibold text-white' : isActive ? 'font-medium text-white' : 'text-sidebar-fg-muted group-hover/dm:text-sidebar-fg'}`}>{dmName}</span>
                     {unreadCount > 0 && !isActive && (
                       <span className="min-w-[18px] px-1 h-[18px] bg-danger text-white text-[10px] font-semibold tabular-nums rounded-full flex items-center justify-center ml-1 shrink-0">
                         {formatUnread(unreadCount)}
@@ -403,11 +403,11 @@ export const Sidebar = ({
       <div className="mt-auto border-t border-white/[0.06] px-3 py-2.5">
         <div className="flex items-center gap-2.5">
           <span className="relative shrink-0">
-            <Avatar name={user?.username} size="sm" />
+            <Avatar name={myName} userId={user?.id} size="sm" />
             <span aria-hidden="true" className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-sidebar ${currentUserBusy ? 'bg-danger' : 'bg-presence-online'}`} />
           </span>
           <div className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-[13px] font-medium leading-tight text-sidebar-fg">{user?.username || 'Guest'}</span>
+            <span className="truncate text-[13px] font-medium leading-tight text-sidebar-fg">{user ? myName : 'Guest'}</span>
             <span className="mt-0.5 text-[11px] leading-none text-sidebar-fg-muted">{currentUserBusy ? 'In a meeting' : 'Active'}</span>
           </div>
         </div>

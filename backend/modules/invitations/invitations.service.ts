@@ -675,7 +675,15 @@ export const resolveJoinRequest = async (
       create: { userId: joinRequest.userId, channelId: generalChannel.id, role: 'member' },
     });
   });
-  await logAuditEvent(adminId, 'APPROVE_JOIN_REQUEST', 'WORKSPACE', workspaceId, `Approved join request of user ${joinRequest.userId}`);
+  // QA L43: name the person (the id stays for traceability).
+  const approvedUser = await prisma.user.findUnique({ where: { id: joinRequest.userId }, select: { username: true } });
+  await logAuditEvent(
+    adminId,
+    'APPROVE_JOIN_REQUEST',
+    'WORKSPACE',
+    workspaceId,
+    `Approved the join request of "${approvedUser?.username ?? 'unknown user'}" (user ${joinRequest.userId})`
+  );
 
   return {
     status: 'APPROVED' as const,

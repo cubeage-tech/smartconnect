@@ -198,7 +198,8 @@ export const CreateProjectModal = ({ workspaceId, onClose, onCreated }: { worksp
     if (!name.trim()) found.name = 'Give the project a name.';
     else if (name.trim().length > 80) found.name = 'Keep the name under 80 characters.';
     if (effectiveKey && !PROJECT_KEY_PATTERN.test(effectiveKey)) found.key = '2–6 capital letters or digits, starting with a letter.';
-    if (startDate && dueDate && dueDate < startDate) found.dueDate = 'The due date is before the start date.';
+    // QA L31: the project form calls this field "Target date".
+    if (startDate && dueDate && dueDate < startDate) found.dueDate = 'The target date is before the start date.';
     setErrors(found);
     if (Object.keys(found).length) return;
     setBusy(true);

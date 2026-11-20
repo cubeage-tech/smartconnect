@@ -35,7 +35,7 @@ export const ProtectedRoute = ({ children, requireAdmin = false }: ProtectedRout
 
   if (loading) return <LoadingScreen />;
   if (!user && sessionError) return <SessionUnavailable message={sessionError} onRetry={retrySession} onSignOut={logout} />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={requireAdmin ? '/admin/login' : '/login'} replace />;
 
   const admin = isAdminAccount(user);
   if (requireAdmin && !admin) return <Navigate to="/" replace />;

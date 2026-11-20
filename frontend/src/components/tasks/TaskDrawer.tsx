@@ -1,3 +1,4 @@
+import { Layer } from '../ui/Layer';
 import { formatDistanceToNow } from 'date-fns';
 import { Link2, Loader2, Paperclip, Pencil, Plus, Send, Share2, Trash2, X } from 'lucide-react';
 import { ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -175,15 +176,17 @@ export const TaskDrawer = ({ taskId, projectTasks, members, canCreateTask, onClo
     }
   };
 
+  // QA H1: rendered at the end of <body> (ui/Layer) above the app header, so
+  // the drawer's Close / Share / Delete are never under it.
   return (
-    <>
-      <div className="fixed inset-0 z-[60] bg-overlay md:bg-transparent" onClick={onClose} aria-hidden="true" />
+    <Layer>
+      <div className="fixed inset-0 z-[105] bg-overlay md:bg-transparent" onClick={onClose} aria-hidden="true" />
       <aside
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-labelledby={titleId}
-        className="fixed inset-y-0 right-0 z-[70] flex w-full max-w-[min(100vw,36rem)] flex-col border-l border-line bg-surface shadow-2xl outline-none animate-fade-in"
+        className="fixed inset-y-0 right-0 z-[110] flex w-full max-w-[min(100vw,36rem)] flex-col border-l border-line bg-surface shadow-2xl outline-none animate-fade-in"
       >
         {!task && !error && (
           <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading task">
@@ -238,7 +241,7 @@ export const TaskDrawer = ({ taskId, projectTasks, members, canCreateTask, onClo
         )}
       </aside>
       {dialog}
-    </>
+    </Layer>
   );
 };
 
@@ -808,7 +811,7 @@ const Comments = ({ task, canComment, onReload }: { task: TaskDetail; canComment
       <ul className="space-y-3">
         {task.comments.map((c) => (
           <li key={c.id} className="flex gap-2.5">
-            <Avatar name={c.author ? personName(c.author) : '?'} size="sm" />
+            <Avatar name={c.author ? personName(c.author) : '?'} userId={c.author?.id} size="sm" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 text-xs">
                 <span className="font-semibold text-fg">{c.author ? personName(c.author) : 'Former member'}</span>

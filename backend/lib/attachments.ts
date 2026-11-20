@@ -140,10 +140,10 @@ export const destroyFilesOfDeletedMessages = async (messages: { id: string; file
   }
 };
 
-/** Destroys uploads that are attached to no message and no task (T.33) after the grace period. */
+/** Destroys uploads that are attached to no message, no task (T.33) and no profile (QA H4) after the grace period. */
 export const sweepOrphanAttachments = async (now = Date.now()) => {
   const orphans = await prisma.attachment.findMany({
-    where: { messageId: null, taskId: null, createdAt: { lt: new Date(now - ORPHAN_GRACE_MS) } },
+    where: { messageId: null, taskId: null, avatarOf: { is: null }, createdAt: { lt: new Date(now - ORPHAN_GRACE_MS) } },
     take: 200,
   });
   return destroyAttachments(orphans);

@@ -116,7 +116,9 @@ export const CreateChannelModal = ({ isOpen, onClose }: CreateChannelModalProps)
               autoFocus
               type="text"
               maxLength={80}
-              placeholder="product-launch"
+              // QA L35: names keep their capitals and spaces (like "General"), so the
+              // example is written the same way.
+              placeholder="e.g. Product launch"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={`${fieldClass} h-10 min-w-0 flex-1`}

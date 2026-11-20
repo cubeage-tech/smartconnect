@@ -4,6 +4,14 @@ import { Prisma } from '@prisma/client';
 import { APP_URL, JWT_SECRET } from '../../config/env';
 import { logAuditEvent } from '../../lib/auditLog';
 import { isValidEmail } from '../../lib/email';
+import {
+  EMAIL_FAILING_AFTER_OUTAGE_MS,
+  EMAIL_FAILING_AFTER_REJECTION_MS,
+  EmailSendError,
+  emailDeliveryConfigured,
+  emailDeliveryFailing,
+  markEmailDeliveryFailing,
+} from '../../lib/emailDelivery';
 import { findUserIdByEmail } from '../../lib/identity';
 import { passwordProblem } from '../../lib/passwordPolicy';
 import { prisma } from '../../lib/prisma';
@@ -438,20 +446,37 @@ export const getMe = async (userId: string) => {
 // Appending the current password hash to the JWT secret makes the link
 // self-invalidating: the moment the password actually changes, every
 // previously issued link (including any the admin generated) stops verifying.
-export const issuePasswordReset = async (user: { id: string; email: string; password: string }) => {
+export const issuePasswordReset = async (user: { id: string; email: string; password: string }): Promise<'sent' | 'not_configured'> => {
   const secret = JWT_SECRET + user.password;
   const resetToken = jwt.sign({ id: user.id }, secret, { expiresIn: '15m' });
   // The frontend's /reset-password page, at the configured frontend origin (APP_URL).
   const resetLink = `${APP_URL}/reset-password?token=${resetToken}&id=${user.id}`;
-  await sendResetPasswordEmail(user.email, resetLink);
+  const result = await sendResetPasswordEmail(user.email, resetLink);
+  return result && result.sent === false ? 'not_configured' : 'sent';
 };
 
 // T.32 (audit M1): one answer whether or not the address has an account, so
 // this endpoint cannot be used to discover accounts (it is rate limited too).
-const FORGOT_PASSWORD_REPLY = { message: 'If an account exists for that address, a password reset link has been sent.' };
+// QA C2: "sent" was claimed even with no e-mail service. The reply now only
+// says the link is on its way (Brevo accepting it is all this server can know).
+export const FORGOT_PASSWORD_REPLY = {
+  message: 'If an account exists for that address, a password reset link is on its way. It can take a few minutes to arrive, so check your spam folder too.',
+};
+export const PASSWORD_RESET_UNAVAILABLE =
+  'Password reset e-mails can’t be sent right now. Please try again later, or ask your administrator to reset your password.';
 
+/**
+ * QA C2: when no reset e-mail can go out, say so, never "sent". The answer
+ * stays identical for every address (no account discovery): the "can't send"
+ * case is decided before the account lookup — from the server's e-mail
+ * settings and from recent Brevo refusals, which apply to all addresses alike
+ * (lib/emailDelivery.ts). Only the very first failed send in a window answers
+ * differently from an unknown address; after it, every request gets the same
+ * 503 until the window ends.
+ */
 export const forgotPassword = async (email: unknown) => {
   if (!isFilledString(email)) throw new HttpError(400, 'Email is required');
+  if (!emailDeliveryConfigured() || emailDeliveryFailing()) throw new HttpError(503, PASSWORD_RESET_UNAVAILABLE);
   if (!isValidEmail(email)) return FORGOT_PASSWORD_REPLY;
 
   const user = await prisma.user.findUnique({ where: { email } });
@@ -459,7 +484,16 @@ export const forgotPassword = async (email: unknown) => {
   // still cannot sign in afterwards (tests/stage2-team-leads.test.ts).
   if (!user) return FORGOT_PASSWORD_REPLY;
 
-  await issuePasswordReset(user);
+  try {
+    if ((await issuePasswordReset(user)) === 'not_configured') throw new HttpError(503, PASSWORD_RESET_UNAVAILABLE);
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    const rejected = err instanceof EmailSendError && err.providerRejected;
+    markEmailDeliveryFailing(rejected ? EMAIL_FAILING_AFTER_REJECTION_MS : EMAIL_FAILING_AFTER_OUTAGE_MS);
+    // The reason only (Brevo status and text, key redacted); never the link or token.
+    console.error('Password reset e-mail was not sent:', (err as Error)?.message ?? err);
+    throw new HttpError(503, PASSWORD_RESET_UNAVAILABLE);
+  }
   return FORGOT_PASSWORD_REPLY;
 };
 

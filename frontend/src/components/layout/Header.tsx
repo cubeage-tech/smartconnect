@@ -1,3 +1,4 @@
+import { usePersonName } from '../../lib/people';
 import { Command, LogOut, Mail, Menu, ShieldCheck, User as UserIcon, UserPlus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -18,17 +19,22 @@ export const Header = ({
   onMenuClick,
   searchScope = null,
   hideOnPhone = false,
+  hideSearchOnPhone = false,
   sidebarHidden = false,
 }: {
   onMenuClick?: () => void;
   searchScope?: SearchScope | null;
   /** T.39: a full-screen conversation on a phone has its own top bar. */
   hideOnPhone?: boolean;
+  /** QA L24: a phone page with its own search box (Chats) shows only that one. */
+  hideSearchOnPhone?: boolean;
   /** T.39: tablet only — whether the collapsible sidebar is currently hidden. */
   sidebarHidden?: boolean;
 }) => {
   const isTablet = useMediaQuery(TABLET_QUERY);
   const { user, logout } = useAuth();
+  // QA H4 / L8: your display name and the same avatar everywhere.
+  const myName = usePersonName(user);
   // Shares WorkspaceLayout's already-established socket via context instead
   // of calling useSocket(token) again — Header only ever renders inside
   // WorkspaceLayout, and useSocket isn't a singleton: each independent call
@@ -122,6 +128,7 @@ export const Header = ({
       </div>
 
       {/* In-channel / workspace message search (F1) — scoped to the open conversation. */}
+      <div className={`contents ${hideSearchOnPhone ? 'max-md:hidden' : ''}`}>
       <ChannelSearch
         scope={searchScope}
         workspace={workspaceId && currentWorkspace ? { id: workspaceId, name: currentWorkspace.name } : null}
@@ -130,13 +137,16 @@ export const Header = ({
           navigate(`/${workspaceId}/c/${target.channelId}`);
         }}
       />
+      </div>
 
       <div className="relative flex shrink-0 items-center justify-end gap-1.5 md:flex-1" ref={dropdownRef}>
         {/* T.33: the command palette (also ⌘K / Ctrl+K). */}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new Event('smartconnect:open-palette'))}
-          className="flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[13px] font-medium text-sidebar-fg-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-fg"
+          // QA L24: a keyboard-shortcut button means nothing on a phone (and was a
+          // 31×27 tap target next to the search field); shown from tablet width up.
+          className="hidden items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-[13px] font-medium text-sidebar-fg-muted transition-colors hover:bg-sidebar-hover hover:text-sidebar-fg md:flex"
           title="Search and jump to anything (Ctrl+K)"
           aria-label="Search and jump to anything (Ctrl+K)"
         >
@@ -167,7 +177,7 @@ export const Header = ({
           className="rounded-lg p-1 transition-colors hover:bg-sidebar-hover"
         >
           <span className="relative block">
-            <Avatar name={user?.username} size="sm" initials={2} />
+            <Avatar name={myName} userId={user?.id} size="sm" />
             <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-sidebar ${currentStatus.dot}`} aria-hidden="true" />
           </span>
         </button>
@@ -175,9 +185,9 @@ export const Header = ({
         {isDropdownOpen && (
           <div className="absolute right-0 top-11 z-50 w-[300px] overflow-hidden rounded-xl border border-line bg-surface text-fg shadow-xl animate-pop-in origin-top-right" role="menu" aria-label="Account">
             <div className="flex items-center gap-3 border-b border-line p-4">
-              <Avatar name={user?.username} size="lg" />
+              <Avatar name={myName} userId={user?.id} size="lg" />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">{user?.username}</p>
+                <p className="truncate text-sm font-semibold">{myName}</p>
                 {user?.email && (
                   <p className="flex items-center gap-1 truncate text-xs text-fg-subtle">
                     <Mail size={11} aria-hidden="true" />

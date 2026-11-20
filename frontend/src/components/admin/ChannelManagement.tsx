@@ -1,14 +1,18 @@
+import { AdminPageHeader } from './AdminPageHeader';
 import axios from 'axios';
-import { Hash, Megaphone, RefreshCw, Users } from 'lucide-react';
+import { Hash, Megaphone, RefreshCw, Search, Users } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../hooks/useSocket';
 import { Channel } from '../../types';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 // Shape returned only by GET /api/channels/admin/all — the regular
 // GET /api/channels (sidebar listing) doesn't include this.
 interface AdminChannel extends Channel {
   _count: { members: number };
+  // QA M10: which workspace the channel belongs to.
+  workspace?: { id: string; name: string } | null;
 }
 
 const SkeletonRow = () => (
@@ -22,6 +26,7 @@ const SkeletonRow = () => (
         </div>
       </div>
     </td>
+    <td className="px-6 py-4"><div className="h-3.5 w-24 bg-gray-100 rounded" /></td>
     <td className="px-6 py-4"><div className="h-5 w-14 bg-gray-100 rounded" /></td>
     <td className="px-6 py-4"><div className="h-5 w-14 bg-gray-100 rounded" /></td>
     <td className="px-6 py-4"><div className="h-3.5 w-16 bg-gray-100 rounded" /></td>
@@ -40,6 +45,8 @@ export const ChannelManagement = () => {
   const [broadcastTarget, setBroadcastTarget] = useState<AdminChannel | null>(null);
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcasting, setBroadcasting] = useState(false);
+  // QA L36: the app's confirmation dialog instead of window.confirm().
+  const [deleteTarget, setDeleteTarget] = useState<AdminChannel | null>(null);
 
   const fetchAllChannels = useCallback(async () => {
     try {
@@ -81,7 +88,8 @@ export const ChannelManagement = () => {
     };
   }, [socket]);
 
-  const filteredChannels = channels.filter(c => c.name?.toLowerCase().includes(searchTerm.toLowerCase()));
+  // QA M10: matches the channel or its workspace name.
+  const filteredChannels = channels.filter((c) => `${c.name ?? ''} ${c.workspace?.name ?? ''}`.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const handleSendBroadcast = async () => {
     if (!broadcastTarget || !broadcastText.trim()) return;
@@ -106,15 +114,14 @@ export const ChannelManagement = () => {
       return;
     }
 
-    if (confirm(`Delete channel "#${channelName}"?`)) {
-      try {
-        await axios.delete(`/api/channels/${channelId}`);
-        setChannels(prev => prev.filter(c => c.id !== channelId));
-        setSuccess('Channel deleted!');
-        setTimeout(() => setSuccess(null), 3000);
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Failed to delete channel');
-      }
+    setDeleteTarget(null);
+    try {
+      await axios.delete(`/api/channels/${channelId}`);
+      setChannels(prev => prev.filter(c => c.id !== channelId));
+      setSuccess('Channel deleted!');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to delete channel');
     }
   };
 
@@ -135,22 +142,23 @@ export const ChannelManagement = () => {
         </div>
       )}
 
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-          <div className="p-2 bg-violet-100 rounded-lg">
-            <Hash className="text-violet-600" />
-          </div>
-          Channel Administration
-        </h1>
-
+      {/* QA L42: the shared admin header; the search now has an icon like the others. */}
+      <AdminPageHeader
+        title="Channel Administration"
+        description="Every channel in every workspace: its workspace, type, state and members."
+        actions={
         <div className="flex gap-3">
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="px-4 py-2 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition-all"
-          />
+          <div className="relative">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search channels"
+              placeholder="Search channels or workspaces…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-64 max-w-full rounded-lg border border-gray-200 py-2 pl-9 pr-3 outline-none transition-all focus:border-violet-500 focus:ring-2 focus:ring-violet-500"
+            />
+          </div>
           <button
             onClick={fetchAllChannels}
             disabled={loading}
@@ -160,13 +168,15 @@ export const ChannelManagement = () => {
             Refresh
           </button>
         </div>
-      </div>
+        }
+      />
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <table className="w-full">
           <thead className="border-b bg-gray-50">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700">Channel</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700">Workspace</th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700">Type</th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700">Status</th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700">Members</th>
@@ -177,7 +187,7 @@ export const ChannelManagement = () => {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
             ) : filteredChannels.length === 0 ? (
-              <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-600">No channels found</td></tr>
+              <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-600">No channels found</td></tr>
             ) : (
               filteredChannels.map((ch) => (
                 <tr key={ch.id} className="hover:bg-gray-50">
@@ -192,13 +202,20 @@ export const ChannelManagement = () => {
                       </div>
                     </div>
                   </td>
+                  <td className="px-6 py-4 text-sm text-gray-700">{ch.workspace?.name ?? '—'}</td>
                   <td className="px-6 py-4">
+                    {/* QA M10: the channel's real visibility (private channels used to show "Public"). */}
                     <span className="px-2 py-1 rounded text-xs bg-blue-100 text-blue-700">
-                      {ch.isDM ? 'Private' : 'Public'}
+                      {ch.visibility === 'PRIVATE' ? 'Private' : 'Public'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-700">Active</span>
+                    {/* QA M10: archived channels are shown as archived. */}
+                    {ch.archivedAt ? (
+                      <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-600">Archived</span>
+                    ) : (
+                      <span className="px-2 py-1 rounded text-xs bg-green-100 text-green-700">Active</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700">
                     <div className="flex items-center gap-1.5">
@@ -217,7 +234,7 @@ export const ChannelManagement = () => {
                         </button>
                       )}
                       {ch.name?.toLowerCase() !== 'general' ? (
-                        <button onClick={() => handleDeleteChannel(ch.id, ch.name || '')} className="text-red-600 hover:text-red-800">Delete</button>
+                        <button type="button" onClick={() => setDeleteTarget(ch)} className="text-red-600 hover:text-red-800">Delete</button>
                       ) : (
                         <span className="text-gray-400">Protected</span>
                       )}
@@ -263,6 +280,16 @@ export const ChannelManagement = () => {
             </div>
           </div>
         </div>
+      )}
+      {deleteTarget && (
+        <ConfirmDialog
+          title={`Delete #${deleteTarget.name}?`}
+          message={`This deletes the channel${deleteTarget.workspace ? ` in ${deleteTarget.workspace.name}` : ''} and its messages for everyone. It can't be undone.`}
+          confirmLabel="Delete channel"
+          tone="danger"
+          onConfirm={() => handleDeleteChannel(deleteTarget.id, deleteTarget.name || '')}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );

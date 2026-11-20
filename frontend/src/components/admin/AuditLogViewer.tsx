@@ -1,5 +1,7 @@
+import { AdminPageHeader } from './AdminPageHeader';
 import axios from 'axios';
-import { ClipboardList, Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, Search, ShieldAlert } from 'lucide-react';
+import { Avatar } from '../ui/Avatar';
 import { useEffect, useState } from 'react';
 
 interface AuditLogEntry {
@@ -10,13 +12,31 @@ interface AuditLogEntry {
   details: string;
   createdAt: string;
   actor: { id: string; username: string };
+  /** QA L43: the current username of the user an entry is about. */
+  targetLabel?: string | null;
 }
 
 interface AuditLogPage {
   logs: AuditLogEntry[];
   nextCursor: string | null;
   hasMore: boolean;
+  actions?: string[];
 }
+
+const ISO_TIMESTAMP = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z\b/g;
+/**
+ * QA L43: entries read as sentences — ISO timestamps written into details are
+ * shown as local dates, and a user id the entry is about is shown as @name.
+ * The stored record itself is unchanged.
+ */
+export const readableDetails = (log: Pick<AuditLogEntry, 'details' | 'targetId' | 'targetLabel'>) => {
+  let text = log.details.replace(ISO_TIMESTAMP, (iso) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  });
+  if (log.targetId && log.targetLabel) text = text.split(log.targetId).join(`@${log.targetLabel}`);
+  return text;
+};
 
 const ACTION_BADGE_STYLES: Record<string, string> = {
   BAN_USER: 'bg-red-100 text-red-700 border-red-200',
@@ -40,11 +60,17 @@ export const AuditLogViewer = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // QA L43: filter by action type and search details / actor.
+  const [action, setAction] = useState('');
+  const [query, setQuery] = useState('');
+  const [actions, setActions] = useState<string[]>([]);
 
   const fetchPage = async (cursor?: string) => {
     try {
-      const res = await axios.get<AuditLogPage>('/api/admin/audit-logs', { params: cursor ? { cursor } : {} });
+      const params = { ...(cursor ? { cursor } : {}), ...(action ? { action } : {}), ...(query.trim() ? { q: query.trim() } : {}) };
+      const res = await axios.get<AuditLogPage>('/api/admin/audit-logs', { params });
       setLogs(prev => (cursor ? [...prev, ...res.data.logs] : res.data.logs));
+      if (res.data.actions) setActions(res.data.actions);
       setNextCursor(res.data.nextCursor);
       setHasMore(res.data.hasMore);
     } catch (err) {
@@ -57,8 +83,11 @@ export const AuditLogViewer = () => {
   };
 
   useEffect(() => {
-    fetchPage();
-  }, []);
+    setLoading(true);
+    const timer = setTimeout(() => void fetchPage(), query ? 300 : 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [action, query]);
 
   const handleLoadMore = () => {
     if (!nextCursor) return;
@@ -68,14 +97,34 @@ export const AuditLogViewer = () => {
 
   return (
     <div className="p-8 h-full flex flex-col bg-gray-50">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-          <div className="p-2 bg-violet-100 rounded-lg">
-            <ClipboardList className="text-violet-600" size={28} />
-          </div>
-          Audit Logs
-        </h1>
-        <p className="text-gray-600 font-medium text-sm mt-2">A permanent record of every admin action taken in this workspace</p>
+      {/* QA L42 / L43: the shared header; the log covers the whole company, not one workspace. */}
+      <AdminPageHeader title="Audit Logs" description="A permanent record of every administrative action across the company." />
+
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+        <div className="relative flex-1 sm:max-w-sm">
+          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+          <input
+            type="search"
+            aria-label="Search the audit log"
+            placeholder="Search details or people…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
+          />
+        </div>
+        <select
+          aria-label="Filter by action"
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-500"
+        >
+          <option value="">All actions</option>
+          {actions.map((a) => (
+            <option key={a} value={a}>
+              {formatActionLabel(a)}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && (
@@ -92,15 +141,13 @@ export const AuditLogViewer = () => {
             </div>
           ) : logs.length === 0 ? (
             <div className="py-16 text-center text-gray-500 font-medium text-sm uppercase tracking-wider">
-              No admin actions recorded yet
+              {action || query ? 'No entries match these filters' : 'No admin actions recorded yet'}
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
               {logs.map((log) => (
                 <div key={log.id} className="px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                  <div className="w-9 h-9 rounded-lg bg-accent-600 flex items-center justify-center text-white text-xs font-semibold uppercase shrink-0 mt-0.5">
-                    {log.actor.username[0] || '?'}
-                  </div>
+                  <Avatar name={log.actor.username} userId={log.actor.id} size="md" className="mt-0.5" />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="text-sm font-bold text-gray-900">{log.actor.username}</span>
@@ -110,7 +157,7 @@ export const AuditLogViewer = () => {
                         {formatActionLabel(log.action)}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600">{log.details}</p>
+                    <p className="text-sm text-gray-600 break-words">{readableDetails(log)}</p>
                   </div>
                   <div className="text-xs text-gray-400 font-medium shrink-0 whitespace-nowrap mt-1">
                     {new Date(log.createdAt).toLocaleString(undefined, {

@@ -1,3 +1,5 @@
+import { nameIn, usePeopleDirectory } from '../../lib/people';
+import { Avatar } from '../ui/Avatar';
 import axios from 'axios';
 import { Loader2, Search } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,6 +27,7 @@ const roleBadge = (m: WorkspaceMember) => (m.isOwner ? 'Owner' : m.role === 'ADM
  * every account on the platform), live presence, and profile cards.
  */
 export const PeopleDirectory = ({ workspaceId, currentUserId, onMessage }: PeopleDirectoryProps) => {
+  const people = usePeopleDirectory();
   const [query, setQuery] = useState('');
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -111,12 +114,11 @@ export const PeopleDirectory = ({ workspaceId, currentUserId, onMessage }: Peopl
                 type="button"
                 onClick={() => setSelectedId(m.id)}
                 className="w-full flex items-center gap-3 p-4 rounded-xl border border-gray-200 bg-white text-left hover:border-violet-300 hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-500"
-                aria-label={`View profile of ${m.username}`}
+                aria-label={`View profile of ${nameIn(people, m)}`}
               >
                 <span className="relative shrink-0">
-                  <span className="w-11 h-11 rounded-xl bg-accent-600 text-white flex items-center justify-center font-bold uppercase">
-                    {m.username[0]}
-                  </span>
+                  {/* QA H4 / L9: the shared avatar (photo, or colour by person). */}
+                  <Avatar name={nameIn(people, m)} userId={m.id} size="lg" />
                   <span
                     role="img"
                     aria-label={m.presence ? 'Online' : 'Offline'}
@@ -126,7 +128,7 @@ export const PeopleDirectory = ({ workspaceId, currentUserId, onMessage }: Peopl
                 <span className="flex-1 min-w-0">
                   <span className="flex items-center gap-2">
                     <span className="font-bold text-gray-900 truncate">
-                      {m.username}
+                      {nameIn(people, m)}
                       {m.id === currentUserId && <span className="font-normal text-gray-400"> (you)</span>}
                     </span>
                     {roleBadge(m) && (
@@ -135,7 +137,8 @@ export const PeopleDirectory = ({ workspaceId, currentUserId, onMessage }: Peopl
                       </span>
                     )}
                   </span>
-                  <span className="block text-xs text-gray-500 truncate">{m.title || m.email}</span>
+                  {/* QA L19: the title as saved (the directory updates when you save your profile). */}
+                  <span className="block text-xs text-gray-500 truncate">{people.get(m.id)?.title || m.title || m.email}</span>
                 </span>
               </button>
             </li>

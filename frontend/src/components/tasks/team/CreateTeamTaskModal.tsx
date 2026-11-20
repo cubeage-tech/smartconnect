@@ -133,9 +133,10 @@ export const CreateTeamTaskModal = ({
           <Field label="Due date (optional)">
             <TextInput type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </Field>
-          <Field label="Project (optional)" hint="Left empty, it goes to the workspace's private “Team tasks” list.">
+          {/* QA L30: the empty choice says what it means, and the hint matches it. */}
+          <Field label="Project (optional)" hint="Without a project, the task goes to the workspace's private “Team tasks” list.">
             <select className={selectClass} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-              <option value="">Team tasks</option>
+              <option value="">No project (Team tasks list)</option>
               {options.projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}

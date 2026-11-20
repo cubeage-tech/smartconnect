@@ -12,6 +12,14 @@ export interface SignupDetails {
   inviteToken?: string;
 }
 
+/** QA L39: the Administrator console was used with an account that is not an administrator. */
+export class NotAnAdministratorError extends Error {
+  constructor() {
+    super('This account isn’t an administrator. Use the regular sign-in instead.');
+    this.name = 'NotAnAdministratorError';
+  }
+}
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -19,9 +27,16 @@ interface AuthContextType {
   /** P2: keeps the in-session copy of User.lastActiveWorkspaceId current ("/" lands there). */
   setLastActiveWorkspace?: (workspaceId: string) => void;
 
+  /**
+   * QA L39: `adminOnly` (the Administrator console form) refuses a non-admin
+   * account: the session it just created is ended and NotAnAdministratorError
+   * is thrown, so the person stays on the form instead of being signed into
+   * the regular app.
+   */
   login: (
     email: string,
-    password: string
+    password: string,
+    options?: { adminOnly?: boolean }
   ) => Promise<void>;
 
   // Public, single-step signup — active path right now (no email/OTP
@@ -230,7 +245,8 @@ export const AuthProvider: React.FC<{
 
   const login = async (
     email: string,
-    password: string
+    password: string,
+    options?: { adminOnly?: boolean }
   ) => {
     const res = await axios.post<{
       token: string;
@@ -244,6 +260,16 @@ export const AuthProvider: React.FC<{
       token: newToken,
       user: newUser,
     } = res.data;
+
+    if (options?.adminOnly && newUser.role !== 'ADMIN') {
+      // End the session the server just created; nothing is stored in this tab.
+      try {
+        await axios.post('/api/auth/logout', null, { headers: { Authorization: `Bearer ${newToken}` } });
+      } catch (err) {
+        console.warn('Could not end the non-administrator session:', err);
+      }
+      throw new NotAnAdministratorError();
+    }
 
     writeStoredToken(newToken);
 

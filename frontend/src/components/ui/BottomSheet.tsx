@@ -66,7 +66,7 @@ export const BottomSheet = ({ title, onClose, children }: { title: string; onClo
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[120] flex items-end justify-center bg-overlay animate-fade-in"
+      className="fixed inset-0 z-[160] flex items-end justify-center bg-overlay animate-fade-in"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import { app } from './app';
-import { PORT } from './config/env';
+import { NODE_ENV, PORT } from './config/env';
+import { reportStorageCredentials } from './lib/cloudinary';
 import { startAttachmentSweeper } from './lib/attachments';
 import { isShuttingDown, markShuttingDown } from './lib/lifecycle';
 import { prisma } from './lib/prisma';
@@ -89,4 +90,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   reconcileSharedWorkspace()
     .then((r) => console.log(`SmartConnect Collab ready (${r.channelIds.length} channels; ${r.membersAdded} member(s) added).`))
     .catch((err) => console.error('SmartConnect Collab reconcile failed:', err));
+  // QA C1: name a rejected storage credential at startup instead of letting
+  // it surface only as failing uploads. Production only: local runs and the
+  // E2E storage stand-in have no real Cloudinary account to ask.
+  if (NODE_ENV === 'production') void reportStorageCredentials();
 });

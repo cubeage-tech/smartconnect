@@ -62,6 +62,12 @@ beforeAll(() => {
       'DATABASE_URL must be set to run the backend test suite — point it at a disposable Postgres database, never a real one.'
     );
   }
+  // The suite migrates and truncates tables. backend/.env may hold a hosted
+  // (production) URL that dotenv would load, so refuse anything but a local
+  // database — the same rule playwright.config.ts applies to E2E runs.
+  if (!/^postgres(ql)?:\/\/[^@/]*@?(localhost|127\.0\.0\.1)(:\d+)?\//.test(process.env.DATABASE_URL) && !/[?&]host=\/(tmp|var\/run)/.test(process.env.DATABASE_URL)) {
+    throw new Error('Refusing to run the backend test suite against a non-local DATABASE_URL. Point it at a disposable local Postgres database.');
+  }
   execSync('npx prisma migrate deploy', { stdio: 'inherit' });
 });
 

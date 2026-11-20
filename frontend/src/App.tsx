@@ -4,6 +4,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { lazy, Suspense } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
+import { useResolvedTheme } from './lib/theme';
 import { router } from './routes/router';
 
 // T.37: development-only per-tab sign-in control (lib/devTabSession.ts).
@@ -12,6 +13,8 @@ import { router } from './routes/router';
 const DevTabSessionPanel = import.meta.env.DEV ? lazy(() => import('./components/dev/DevTabSessionPanel')) : null;
 
 export default function App() {
+  // QA L2: toasts follow the app theme (light/dark), not the library default.
+  const theme = useResolvedTheme();
   return (
     // T.32: motion-library animations follow the OS "reduce motion" setting
     // (CSS animations already do — index.css).
@@ -23,7 +26,7 @@ export default function App() {
             <DevTabSessionPanel />
           </Suspense>
         )}
-        <ToastContainer position="bottom-right" autoClose={4000} newestOnTop closeOnClick hideProgressBar />
+        <ToastContainer position="top-right" theme={theme} autoClose={4000} newestOnTop closeOnClick hideProgressBar />
       </AuthProvider>
     </MotionConfig>
   );

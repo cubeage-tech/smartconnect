@@ -1,6 +1,7 @@
+import { AdminPageHeader } from './AdminPageHeader';
 import axios from 'axios';
-import { Hash, MessageSquare, Radio, Server, Users, Zap } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Hash, MessageSquare, Radio, Users, Zap } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -11,6 +12,8 @@ import {
   YAxis,
 } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
+import { useResolvedTheme } from '../../lib/theme';
+import { Avatar } from '../ui/Avatar';
 import { useSocket } from '../../hooks/useSocket';
 
 interface AnalyticsResponse {
@@ -31,6 +34,18 @@ interface OnlineUser {
 export const AdminDashboard = () => {
   const { token } = useAuth();
   const socket = useSocket(token);
+  // QA L44: chart colours from the design tokens, re-read when the theme changes.
+  const theme = useResolvedTheme();
+  const chart = useMemo(() => {
+    const css = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
+    const read = (name: string, fallback: string) => css?.getPropertyValue(name).trim() || fallback;
+    return {
+      grid: read('--color-line', '#e1e6e6'),
+      tick: read('--color-fg-subtle', '#667274'),
+      text: read('--color-fg', '#14191a'),
+      surface: read('--color-surface-raised', '#ffffff'),
+    };
+  }, [theme]);
   const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
@@ -100,22 +115,17 @@ export const AdminDashboard = () => {
   return (
     <div className="p-8 font-sans animate-in fade-in slide-in-from-bottom-4 duration-500 bg-gray-50 min-h-screen">
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900 tracking-tight flex items-center gap-3">
-            <div className="p-2 bg-violet-100 rounded-lg">
-              <Server className="text-violet-600" size={28} />
-            </div>
-            System Overview
-          </h1>
-          <p className="text-gray-600 font-medium text-sm mt-2">Real-time Workspace Metrics & Analytics</p>
-        </div>
-        <div className="flex items-center gap-2 px-4 py-3 bg-white border border-green-200 rounded-lg shadow-sm hover:shadow-md transition-shadow">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="text-sm font-semibold text-green-700">All Systems Operational</span>
-        </div>
-      </div>
+      {/* Header (QA L42 / L45: the shared admin header) */}
+      <AdminPageHeader
+        title="System Overview"
+        description="Real-time workspace metrics and analytics."
+        actions={
+          <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-white px-3 py-2 shadow-sm">
+            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+            <span className="text-sm font-semibold text-green-700">All Systems Operational</span>
+          </div>
+        }
+      />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
@@ -158,19 +168,21 @@ export const AdminDashboard = () => {
             <div className="h-72 flex items-center justify-center text-gray-300 text-sm font-medium">Loading chart...</div>
           ) : (
             <ResponsiveContainer width="100%" height={288}>
-              <AreaChart data={analytics?.messagesPerDay ?? []} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
+              {/* QA M8: no negative left margin and a 40px axis, so two- and three-digit counts are never clipped. */}
+              <AreaChart data={analytics?.messagesPerDay ?? []} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorViolet" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.35} />
                     <stop offset="95%" stopColor="#7c3aed" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f0f5" />
-                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#9ca3af', fontWeight: 600 }} axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: '#9ca3af', fontWeight: 600 }} axisLine={false} tickLine={false} width={32} />
+                {/* QA L44: grid, ticks and tooltip take the theme's colours (light and dark). */}
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={chart.grid} />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: chart.tick, fontWeight: 600 }} axisLine={false} tickLine={false} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: chart.tick, fontWeight: 600 }} axisLine={false} tickLine={false} width={40} />
                 <Tooltip
-                  contentStyle={{ borderRadius: 12, border: '1px solid #ede9fe', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}
-                  labelStyle={{ fontWeight: 700, color: '#111827' }}
+                  contentStyle={{ borderRadius: 12, border: `1px solid ${chart.grid}`, background: chart.surface, color: chart.text, boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}
+                  labelStyle={{ fontWeight: 700, color: chart.text }}
                 />
                 <Area type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2.5} fill="url(#colorViolet)" name="Messages" />
               </AreaChart>
@@ -183,7 +195,8 @@ export const AdminDashboard = () => {
           <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-4 border-b border-gray-100 pb-4 flex items-center gap-2">
             <Zap size={16} className="text-violet-600" /> Online Users ({onlineUsers.length})
           </h3>
-          <div className="flex-1 flex flex-col gap-2 overflow-y-auto max-h-60">
+          {/* QA L40: sized to whole rows (four), so no row is cut in half; more rows scroll. */}
+          <div className="flex-1 flex flex-col gap-2 overflow-y-auto max-h-[15.75rem]">
             {onlineUsers.length === 0 ? (
               <div className="text-gray-400 text-center py-8 text-sm">
                 <div className="opacity-50 mb-2 text-2xl">👥</div>
@@ -197,13 +210,17 @@ export const AdminDashboard = () => {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="text-lg">{user.emoji}</span>
+                      {/* QA L40: one status indicator per row (the avatar, then a dot in the status colour). */}
+                      <Avatar name={user.username} userId={user.id} size="sm" />
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-gray-900 truncate">{user.username}</p>
                         <p className="text-[10px] text-gray-400 capitalize">{user.status}</p>
                       </div>
                     </div>
-                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0 ml-2" />
+                    <div
+                      className={`w-2 h-2 rounded-full shrink-0 ml-2 ${user.status === 'away' ? 'bg-presence-away' : /meeting|busy/i.test(String(user.status)) ? 'bg-danger' : 'bg-presence-online'}`}
+                      aria-hidden="true"
+                    />
                   </div>
                 </div>
               ))

@@ -1,3 +1,5 @@
+import { nameIn, usePeopleDirectory } from '../../lib/people';
+import { Avatar } from '../ui/Avatar';
 import axios from 'axios';
 import { format } from 'date-fns';
 import { AlertCircle, Loader2, Send, X } from 'lucide-react';
@@ -58,6 +60,7 @@ interface ThreadPanelProps {
  */
 export const ThreadPanel = ({ messageId, channelId, channelName, socket, onClose, canReply = true }: ThreadPanelProps) => {
   const { user } = useAuth();
+  const people = usePeopleDirectory();
   const [parent, setParent] = useState<ThreadMessage | null>(null);
   const [replies, setReplies] = useState<ThreadMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -233,18 +236,17 @@ export const ThreadPanel = ({ messageId, channelId, channelName, socket, onClose
 
   const renderMessage = (m: ThreadMessage, isParent = false) => (
     <div key={m.id} className={`flex gap-3 px-5 py-3 ${isParent ? '' : 'hover:bg-gray-50/70'}`}>
-      <div className="w-9 h-9 rounded-lg bg-accent-600 text-white flex items-center justify-center font-bold uppercase shrink-0 text-sm">
-        {m.sender?.username?.[0]}
-      </div>
+      {/* QA H4 / L9: the same avatar (colour by person) and display name as the channel. */}
+      <Avatar name={nameIn(people, m.sender, 'Someone')} userId={m.sender?.id} size="md" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-bold text-gray-900 text-sm">{m.sender?.username}</span>
+          <span className="font-bold text-fg text-sm">{nameIn(people, m.sender, 'Someone')}</span>
           <span className="text-[11px] text-gray-400 font-medium">{format(new Date(m.createdAt), 'h:mm a')}</span>
         </div>
         {m.content && (
           <div className="rich-text text-[14px] text-fg leading-relaxed break-words" dangerouslySetInnerHTML={{ __html: sanitizeMessageHtml(m.content) }} />
         )}
-        {m.editedAt && <span className="text-[11px] text-fg-subtle">(edited)</span>}
+        {m.editedAt && <span className="text-xs text-fg-subtle">(edited)</span>}
         {m.fileUrl ? <MessageAttachment fileUrl={m.fileUrl} fileName={m.fileName} fileType={m.fileType} compact /> : null}
         {renderReactions(m)}
         {m.deliveryState === 'pending' && <div className="mt-1 text-[11px] text-gray-400" role="status">Sending…</div>}

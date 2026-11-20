@@ -154,3 +154,12 @@ export const acceptInvitationTo = async (request: APIRequestContext, token: stri
   const accepted = await apiAs(request, token).post(`/api/invitations/received/${invitation!.id}/accept`);
   expect(accepted.status(), await accepted.text()).toBe(200);
 };
+
+/**
+ * QA M17: signs out through the account menu (the header avatar), the way a
+ * person does; the sidebar no longer has a one-click Sign out icon.
+ */
+export const signOut = async (page: Page) => {
+  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Sign out' }).click();
+};

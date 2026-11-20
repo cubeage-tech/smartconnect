@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Check, Loader2, Search } from 'lucide-react';
+import { nameIn, usePeopleDirectory } from '../../lib/people';
 import { Avatar } from '../ui/Avatar';
 import { Modal } from '../ui/Modal';
 import { useEffect, useState } from 'react';
@@ -22,6 +23,7 @@ interface AddMemberModalProps {
 export const AddMemberModal = ({ isOpen, onClose, channelId, channelName }: AddMemberModalProps) => {
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<AddableUser[]>([]);
+  const directory = usePeopleDirectory();
   const [loading, setLoading] = useState(true);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
@@ -98,9 +100,10 @@ export const AddMemberModal = ({ isOpen, onClose, channelId, channelName }: AddM
             const isAdding = addingId === u.id;
             return (
               <li key={u.id} className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-secondary">
-                <Avatar name={u.username} size="md" />
+                {/* QA H4 / L9: the person's display name and id-based colour. */}
+                <Avatar name={nameIn(directory, u, u.username)} userId={u.id} size="md" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-fg">{u.username}</div>
+                  <div className="truncate text-sm font-medium text-fg">{nameIn(directory, u, u.username)}</div>
                   {u.email && <div className="truncate text-xs text-fg-subtle">{u.email}</div>}
                 </div>
                 <button

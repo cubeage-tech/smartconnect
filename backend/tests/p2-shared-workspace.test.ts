@@ -37,7 +37,14 @@ const removeShared = async () => {
 };
 
 beforeAll(removeShared);
-afterAll(removeShared);
+// Leave the database as other suites expect it: public sign-up needs
+// SmartConnect Collab, and test files run in no fixed order. Removing it here
+// without restoring made signups in later files fail with 503 depending on
+// the run order (seen in the baseline: auth.test.ts, email-validation-dos).
+afterAll(async () => {
+  await removeShared();
+  await ensureSharedWorkspace();
+});
 
 const sharedChannelNames = async (workspaceId: string) =>
   (await prisma.channel.findMany({ where: { workspaceId, isDM: false }, select: { name: true, isAnnouncement: true }, orderBy: { name: 'asc' } }));

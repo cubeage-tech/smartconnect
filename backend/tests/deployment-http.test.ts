@@ -11,7 +11,7 @@ const configured = vi.hoisted(() => {
 
 vi.mock('../utils/mailer', () => ({
   sendOtpEmail: vi.fn().mockResolvedValue(undefined),
-  sendResetPasswordEmail: vi.fn().mockResolvedValue(undefined),
+  sendResetPasswordEmail: vi.fn().mockResolvedValue({ sent: true }),
   sendInviteEmail: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -21,7 +21,7 @@ import { app } from '../app';
 import { APP_URL, TRUST_PROXY } from '../config/env';
 import { prisma } from '../lib/prisma';
 import { sendResetPasswordEmail } from '../utils/mailer';
-import { authHeader, createAndLoginUser } from './helpers';
+import { authHeader, createAndLoginUser, withFakeEmailSettings } from './helpers';
 
 /**
  * Render deployment behaviour over HTTP: CORS origins, trust proxy and the
@@ -67,7 +67,7 @@ describe('Render deployment configuration over HTTP', () => {
   it('the password-reset link points at the configured frontend', async () => {
     const { user } = await createAndLoginUser();
     vi.mocked(sendResetPasswordEmail).mockClear();
-    const res = await request(app).post('/api/auth/forgot-password').send({ email: user.email });
+    const res = await withFakeEmailSettings(async () => request(app).post('/api/auth/forgot-password').send({ email: user.email }));
     expect(res.status).toBe(200);
     expect(sendResetPasswordEmail).toHaveBeenCalledTimes(1);
     const [to, link] = vi.mocked(sendResetPasswordEmail).mock.calls[0];

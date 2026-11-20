@@ -6,18 +6,18 @@ import { useResolvedTheme } from '../../lib/theme';
 const Picker = lazy(() => import('emoji-picker-react'));
 
 /** Emoji picker that follows the app theme and loads on first use. */
-export const EmojiPicker = ({ onPick }: { onPick: (emoji: string) => void }) => {
+export const EmojiPicker = ({ onPick, width, height }: { onPick: (emoji: string) => void; width?: number; height?: number }) => {
   const theme = useResolvedTheme();
   return (
     <Suspense
       fallback={
-        <div role="status" className="w-[350px] max-w-[90vw] h-[450px] flex items-center justify-center text-sm text-fg-muted bg-surface">
+        <div role="status" style={width && height ? { width, height } : undefined} className={`${width && height ? '' : 'w-[350px] max-w-[90vw] h-[450px] '}flex items-center justify-center text-sm text-fg-muted bg-surface`}>
           Loading emoji…
         </div>
       }
     >
       {/* 'dark' | 'light' are the library's Theme enum values. */}
-      <Picker onEmojiClick={(data) => onPick(data.emoji)} theme={(theme === 'dark' ? 'dark' : 'light') as never} lazyLoadEmojis />
+      <Picker onEmojiClick={(data) => onPick(data.emoji)} theme={(theme === 'dark' ? 'dark' : 'light') as never} lazyLoadEmojis {...(width && height ? { width, height } : {})} />
     </Suspense>
   );
 };

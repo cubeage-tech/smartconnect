@@ -1,6 +1,7 @@
 import request from 'supertest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { app } from '../app';
+import { ensureSharedWorkspace } from '../lib/sharedWorkspace';
 import { invitationFor } from './collab-helpers';
 import { authHeader, uniqueEmail, uniqueUsername } from './helpers';
 
@@ -13,6 +14,13 @@ vi.mock('../utils/mailer', () => ({
 import { sendOtpEmail } from '../utils/mailer';
 
 const mockedSendOtpEmail = vi.mocked(sendOtpEmail);
+
+// Sign-up joins SmartConnect Collab, which the server creates at startup. This
+// file uses the app in-process (no startup), so create it here — otherwise the
+// result depends on whether an earlier file in the run happened to create it.
+beforeAll(async () => {
+  await ensureSharedWorkspace();
+});
 
 beforeEach(() => {
   mockedSendOtpEmail.mockClear();
