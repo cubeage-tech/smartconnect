@@ -1,5 +1,5 @@
 import { AlertTriangle, Loader2, Mic, MicOff, Phone, PhoneIncoming, PhoneOff, ScreenShare, ScreenShareOff, Settings2, Users, Video, VideoOff, WifiOff, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { useAuth } from '../../contexts/AuthContext';
 import { CallType, displayCallerName, formatCallDuration, isSignalFromCallPeer, MAX_PENDING_CANDIDATES } from '../../lib/callSignalling';
@@ -119,7 +119,13 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
   // The call effect only needs to know someone is signed in — depending on the
   // user object itself would restart the call whenever it's refreshed.
   const signedIn = !!user;
-  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  // What the self-view shows: the camera stream, or the captured screen while
+  // presenting. Kept here (not only on the <video>) because the self-view tile
+  // is not on screen yet when the camera starts — the call screen shows
+  // "Requesting camera/microphone access…" until the media is ready — so the
+  // stream must be attached whenever the tile's <video> mounts (attachLocalVideo).
+  const localPreviewRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
@@ -128,6 +134,17 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
   const onEndCallRef = useRef(onEndCall);
   const initialWorkspaceIdRef = useRef(workspaceId);
   const mediaStateRef = useRef<MediaState>({ audio: initialMedia?.audio ?? true, video: callType === 'video' && (initialMedia?.video ?? true) });
+
+  /** Shows `stream` in the self-view: at once if the tile is on screen, and whenever its <video> (re)mounts. */
+  const showLocalPreview = (stream: MediaStream | null) => {
+    localPreviewRef.current = stream;
+    // Re-assigning reloads the element, which also picks up a camera swapped in place (switchDevice).
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+  };
+  const attachLocalVideo = useCallback((video: HTMLVideoElement | null) => {
+    localVideoRef.current = video;
+    if (video && video.srcObject !== localPreviewRef.current) video.srcObject = localPreviewRef.current;
+  }, []);
 
   // Active-speaker detection: one shared AudioContext + one AnalyserNode per
   // participant (local + each remote), sampled on an interval. Kept in refs
@@ -559,7 +576,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
         stream.getAudioTracks().forEach((track) => { track.enabled = mediaStateRef.current.audio; });
         stream.getVideoTracks().forEach((track) => { track.enabled = mediaStateRef.current.video; });
         localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        showLocalPreview(stream);
         registerAudioAnalysis(LOCAL_SPEAKER_ID, stream);
         setMediaReady(true);
 
@@ -615,6 +632,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
 
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      localPreviewRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the call is keyed on these only
   }, [channelId, callType, socket, signedIn]);
@@ -654,7 +672,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
 
       screenStreamRef.current = screenStream;
       await replaceOutgoingTrack('video', screenTrack);
-      if (localVideoRef.current) localVideoRef.current.srcObject = screenStream;
+      showLocalPreview(screenStream);
 
       // Fires when the user stops sharing via the browser's own native
       // "Stop sharing" bar, not just our button — must be handled the same way.
@@ -681,9 +699,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
     const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
     if (cameraTrack) await replaceOutgoingTrack('video', cameraTrack);
 
-    if (localVideoRef.current && localStreamRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-    }
+    if (localStreamRef.current) showLocalPreview(localStreamRef.current);
 
     setIsScreenSharing(false);
     announceMedia({ ...mediaStateRef.current, video: cameraOn && hasCamera });
@@ -710,8 +726,8 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
       if (kind === 'audioinput') {
         unregisterAudioAnalysis(LOCAL_SPEAKER_ID);
         registerAudioAnalysis(LOCAL_SPEAKER_ID, stream);
-      } else if (!isScreenSharing && localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
+      } else if (!isScreenSharing) {
+        showLocalPreview(stream);
       }
     } catch (err) {
       setNotice(`That ${kind === 'audioinput' ? 'microphone' : 'camera'} could not be used: ${describeMediaError(err)}`);
@@ -780,7 +796,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
           {(status !== 'requesting-media' && status !== 'error') && (
             <div className={`grid h-full w-full ${gridColsClass(totalTiles)} auto-rows-fr gap-3 p-3 sm:p-4`}>
               <VideoTile
-                videoRef={localVideoRef}
+                videoRef={attachLocalVideo}
                 username={`${user?.username ?? 'You'} (You)`}
                 mirror={!isScreenSharing}
                 muted
@@ -1049,7 +1065,7 @@ const DeviceMenu = ({ callType, onSelect, onClose }: { callType: CallType; onSel
 };
 
 interface VideoTileProps {
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  videoRef: React.Ref<HTMLVideoElement>;
   username: string;
   mirror?: boolean;
   muted?: boolean;
