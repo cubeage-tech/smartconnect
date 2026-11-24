@@ -23,10 +23,19 @@ interface OutgoingEmail {
 }
 type SendResult = { data: { id?: string }; error: null } | { data: null; error: { message: string; status?: number } };
 
-/** Brevo's error answer in one line — HTTP status, Brevo's code and reason — never repeating the key. */
-const describeBrevoError = (status: number, body: unknown, apiKey: string) => {
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const withoutRecipient = (text: string, recipient: string) =>
+  recipient ? text.replace(new RegExp(escapeRegExp(recipient), 'gi'), '[recipient]') : text;
+
+/**
+ * Brevo's error answer in one line — HTTP status, Brevo's code and reason —
+ * never repeating the key or the recipient's address (a rejection can echo
+ * it, and this text is logged and passed up to callers).
+ */
+const describeBrevoError = (status: number, body: unknown, apiKey: string, recipient: string) => {
   const { code, message } = (body && typeof body === 'object' ? body : {}) as { code?: unknown; message?: unknown };
-  const reason = typeof message === 'string' ? message.split(apiKey).join('[redacted]').slice(0, MAX_REASON_LENGTH) : '';
+  const reason =
+    typeof message === 'string' ? withoutRecipient(message.split(apiKey).join('[redacted]'), recipient).slice(0, MAX_REASON_LENGTH) : '';
   return `Brevo API error (HTTP ${status}${typeof code === 'string' ? ` ${code}` : ''})${reason ? `: ${reason}` : ''}`;
 };
 
@@ -52,7 +61,7 @@ const sendViaBrevo = async ({ apiKey, sender }: EmailSettings, email: OutgoingEm
       signal: controller.signal,
     });
     const body: unknown = await response.json().catch(() => null);
-    if (!response.ok) return { data: null, error: { message: describeBrevoError(response.status, body, apiKey), status: response.status } };
+    if (!response.ok) return { data: null, error: { message: describeBrevoError(response.status, body, apiKey, email.to), status: response.status } };
     const messageId = (body as { messageId?: unknown } | null)?.messageId;
     return { data: { id: typeof messageId === 'string' ? messageId : undefined }, error: null };
   } catch (err) {

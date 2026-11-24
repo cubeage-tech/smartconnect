@@ -162,7 +162,9 @@ export const emailAccountInvitation = async (
     });
     return { emailSent: true };
   } catch (err) {
-    console.error(`Account invitation e-mail to ${loginId} failed:`, err instanceof Error ? err.message : 'unknown error');
+    // No recipient address in the log (it is personal data and the person who
+    // added them already sees the failure in the response).
+    console.error(`Account invitation e-mail (${role}) failed:`, err instanceof Error ? err.message : 'unknown error');
     return { emailSent: false };
   }
 };

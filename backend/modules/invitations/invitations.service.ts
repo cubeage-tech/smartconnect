@@ -230,7 +230,10 @@ const DENIALS: Record<InvitationDenial, [number, (email: string) => string]> = {
   revoked: [400, () => 'This invitation has been revoked.'],
   expired: [400, () => 'This invitation has expired.'],
   inviterLostAccess: [400, () => 'This invitation is no longer valid.'],
-  wrongAccount: [403, (email) => `This invitation was sent to ${email}, not the account you're signed in as.`],
+  // No invited address here: this reaches whoever is signed in, and the error
+  // handler logs it. The invitation page shows the invited address itself
+  // (from the token lookup), so the message does not need to repeat it.
+  wrongAccount: [403, () => 'This invitation was sent to a different account. Sign in with the invited e-mail address, or ask for a new invitation.'],
   inactiveAccount: [403, () => 'This account is not active.'],
 };
 

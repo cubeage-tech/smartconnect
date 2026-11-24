@@ -1,6 +1,6 @@
 # SmartConnect — Real-time / isolation / People remediation tracker
 
-**Date:** 2026-11-23 · **Baseline:** `ebd4317` · Investigation: [SMARTCONNECT_REALTIME_SECURITY_INVESTIGATION.md](SMARTCONNECT_REALTIME_SECURITY_INVESTIGATION.md) · Report: [SMARTCONNECT_REALTIME_FINAL_REPORT.md](SMARTCONNECT_REALTIME_FINAL_REPORT.md)
+**Date:** 2026-11-23, final audit and pre-commit hardening 2026-11-24 · **Baseline:** `ebd4317`; fixes committed as `16a24e9` · Investigation: [SMARTCONNECT_REALTIME_SECURITY_INVESTIGATION.md](SMARTCONNECT_REALTIME_SECURITY_INVESTIGATION.md) · Report: [SMARTCONNECT_REALTIME_FINAL_REPORT.md](SMARTCONNECT_REALTIME_FINAL_REPORT.md)
 
 Status values: **Fixed** (code changed, tests added, verified) · **Verified, no change** (behaviour already correct, now pinned by tests) · **Needs production check** (cannot be confirmed from the repository).
 
@@ -74,7 +74,21 @@ Status values: **Fixed** (code changed, tests added, verified) · **Verified, no
 | Backend: type check / production build / `prisma validate` / migration diff | ✅ / ✅ / ✅ / ✅ no drift |
 | Backend full suite, run 1 (concurrent with E2E) | 708 passed, 5 load timeouts. Those files re-run alone: 25/25 ✅ |
 | Backend full suite, run 2 (unloaded) | 712 passed, 1 failed: **pre-existing** test-order dependency in `member-email-privacy.test.ts`, which also fails on baseline `ebd4317` (final report §6.1) |
+| Backend full suite, **final audit 2026-11-24** (fresh DB, serial, alone) | ✅ **713 passed, 0 failed**, 21 skipped (Redis-only suites), 72 files |
+| Frontend unit, **final audit** | ✅ **82 files, 511 tests** (includes 6 new Home page tests) |
+| Browser E2E, **final audit** | ⚠️ **40/41**. The 1 failure is intermittent (`qa-remediation.spec.ts:34`) and passed 2/2 when re-run alone (AUD-E2E-1) |
+| Type checks, builds, `prisma validate`, migrate status, both migration diffs, **final audit** | ✅ all |
+| Backend full suite, **pre-commit hardening 2026-11-24** (fresh DB, serial, alone) | ✅ **716 passed, 0 failed**, 21 skipped (Redis-only suites), 73 files (includes 3 new `invitation-privacy` tests) |
+| Frontend unit, **pre-commit hardening** | ✅ **82 files, 511 tests** |
+| Browser E2E, **pre-commit hardening** | ✅ **41/41** (15.3 min). `qa-remediation.spec.ts` repeated: ✅ 50/50, plus ✅ 20/20 for the desktop test |
+| Type checks, builds, `prisma validate`, migrate status, both migration diffs, `git diff --check`, **pre-commit hardening** | ✅ all |
 
-| Follow-up (not in scope) | Owner action |
-|---|---|
-| TEST-ORDER-1: `member-email-privacy.test.ts` relies on another file having created SmartConnect Collab | Add `beforeAll(() => reconcileSharedWorkspace())` to that file |
+## Final audit and pre-commit hardening items (2026-11-24)
+
+| Id | Item | Severity | Status | Files |
+|---|---|---|---|---|
+| TEST-ORDER-1 | `member-email-privacy.test.ts` relied on another file having created SmartConnect Collab, so it failed when it ran first on a fresh DB | Test infra | **Fixed** (test setup only: `beforeAll(() => reconcileSharedWorkspace())`; no expectation changed). 10/10 alone on a fresh DB; full suite 713/713 | `backend/tests/member-email-privacy.test.ts` |
+| HOME-1 | Home page redesign (live unread summary, online people, recent conversations, channels by unread) | Feature | **Done**, uncommitted. Covered by 6 unit tests plus the E2E theme/viewport sweep | `frontend/src/components/layout/HomeView.tsx`, `HomeView.test.tsx` (new), `frontend/src/pages/workspace/HomePage.tsx` |
+| AUD-E2E-1 | Intermittent E2E: reaction picker step in `qa-remediation.spec.ts:34`. The trace shows the picker opened, then closed about 80 ms later when the message list scrolled up about one message (the picker closes on list scroll by design). The test depended on live `example.com` link previews, which grow messages late. The exact trigger of that scroll could not be reproduced (0 of 22 targeted runs) | Test flakiness | **Fixed** (test only, pre-commit hardening): `/api/preview` answered in the browser (`page.route`, as in `stage4-company-overview.spec.ts`); asserts that the late preview card renders; waits for a still list before the end-of-list check and before opening the picker. Picker assertions unchanged. No product code changed. Results: production readiness §1.1 | `frontend/e2e/qa-remediation.spec.ts` |
+| AUD-PII-1 | Invited person's address (1) in the failed account-invitation e-mail log line, (2) in the wrong-account 403 (also logged by the error handler), and (3), found while fixing, in Brevo's rejection reason when it repeats the address (logged by the mailer and the invitation services) | Low | **Fixed** (pre-commit hardening). The log line names the role; the 403 reads *"This invitation was sent to a different account. Sign in with the invited e-mail address, or ask for a new invitation."*; the provider reason has the address replaced by `[recipient]`. Failures are still logged and reported to the sender. The 3 new tests fail on `16a24e9` and pass now | `backend/modules/teamManagement/teamLeads.service.ts`, `backend/modules/invitations/invitations.service.ts`, `backend/utils/mailer.ts`, `backend/tests/invitation-privacy.test.ts` (new) |
+| AUD-DEP-1…5 | Deployment blockers: deploy source branch, production migration state, actual Render start command, Cloudinary/Brevo credentials, frontend backend URL / `APP_URL` | Deployment | **Owner action**, no code (production readiness §2) | — |

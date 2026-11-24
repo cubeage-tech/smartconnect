@@ -1,7 +1,8 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { app } from '../app';
 import { prisma } from '../lib/prisma';
+import { reconcileSharedWorkspace } from '../lib/sharedWorkspace';
 import { addToWorkspace, createWorkspace, invitationFor, TestUser } from './collab-helpers';
 import { authHeader, createAndLoginUser, uniqueEmail, uniqueUsername } from './helpers';
 
@@ -19,6 +20,13 @@ import { authHeader, createAndLoginUser, uniqueEmail, uniqueUsername } from './h
  *   GET /api/organizations/:organizationId/members      (list + ?q= search)
  *   GET /api/channels/:channelId/addable-members        (add-member picker)
  */
+
+// Sign-up joins SmartConnect Collab, which the server creates at startup. The
+// test app never starts a server, so create it here — otherwise this file
+// only passed when another file happened to create it first (fresh database).
+beforeAll(async () => {
+  await reconcileSharedWorkspace();
+});
 
 type Viewer = { token: string };
 const get = (viewer: Viewer, path: string) => request(app).get(path).set(authHeader(viewer.token));

@@ -23,6 +23,49 @@ const createAdmin = () => {
   return admin;
 };
 
+/**
+ * Link previews come from POST /api/preview, which fetches the page from the
+ * live internet. The tests below answer it in the browser instead (the
+ * `page.route` convention of stage4-company-overview.spec.ts), so every run
+ * gets the same card, at once, whatever the network: the same answer shape
+ * the server gives for https://example.com. No image, so nothing else is
+ * fetched. Returns how many previews were answered.
+ */
+const deterministicLinkPreviews = async (page: Page) => {
+  const answered = { count: 0 };
+  await page.route('**/api/preview', async (route) => {
+    const { url } = route.request().postDataJSON() as { url: string };
+    answered.count += 1;
+    await route.fulfill({ json: { title: 'Example Domain', description: 'Deterministic E2E link preview', image: '', url } });
+  });
+  return answered;
+};
+
+/**
+ * Waits until the message list has stopped changing: no link preview still
+ * loading, and the same scroll position and height over several frames. The
+ * reaction picker closes when the list scrolls under it (ReactionPicker.tsx),
+ * so it must open on a list that is at rest.
+ */
+const messageListSettled = (page: Page) =>
+  expect
+    .poll(
+      () =>
+        page.evaluate(async () => {
+          const scroller = document.querySelector('main [data-testid="virtuoso-scroller"], main [data-virtuoso-scroller]');
+          if (!scroller || document.querySelector('main [aria-label="Loading link preview"]')) return false;
+          const sample = () => `${scroller.scrollTop}/${scroller.scrollHeight}/${scroller.clientHeight}`;
+          const first = sample();
+          for (let frame = 0; frame < 10; frame++) {
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            if (sample() !== first) return false;
+          }
+          return true;
+        }),
+      { message: 'the message list settles' }
+    )
+    .toBe(true);
+
 /** True when the element is what a click at its centre would actually hit (nothing covers it). */
 const onTop = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((el) => {
@@ -32,6 +75,7 @@ const onTop = (page: Page, selector: string) =>
   });
 
 test('QA desktop: composer, reactions, drawer layering, team task refresh', async ({ page, request }) => {
+  const previews = await deterministicLinkPreviews(page);
   const lead = newUser('qaLead');
   await signUp(page, lead);
   const workspaceId = await createWorkspace(page, `QA ${lead.username}`);
@@ -57,13 +101,17 @@ test('QA desktop: composer, reactions, drawer layering, team task refresh', asyn
   await test.step('L12: a channel opens at its very end — no "Jump to latest" over the newest message', async () => {
     await page.reload();
     await expect(page.locator('main').getByText('qa message 5')).toBeVisible();
-    await page.waitForLoadState('networkidle'); // link previews and other late growth
+    // The late growth this checks for really happens: the newest message's preview card arrives after the list.
+    await expect(page.locator('main [role="article"]').last().getByRole('link', { name: /Example Domain/ })).toBeVisible();
+    expect(previews.count).toBeGreaterThan(0);
+    await messageListSettled(page);
     const scroller = page.locator('main [data-testid="virtuoso-scroller"], main [data-virtuoso-scroller]').first();
     await expect.poll(() => scroller.evaluate((el) => Math.round(el.scrollHeight - el.scrollTop - el.clientHeight))).toBeLessThanOrEqual(1);
     await expect(page.getByRole('button', { name: 'Jump to latest' })).toHaveCount(0);
   });
 
   await test.step('H2 / M1: the reaction picker on the newest message is fully on screen and closes with Escape', async () => {
+    await messageListSettled(page);
     const last = page.locator('main [role="article"]').last();
     await last.hover();
     await last.getByRole('button', { name: 'Add reaction' }).click();
@@ -84,6 +132,9 @@ test('QA desktop: composer, reactions, drawer layering, team task refresh', asyn
     await mine.hover();
     await mine.getByRole('button', { name: 'Edit message' }).click();
     await expect(mine.getByRole('toolbar', { name: 'Message actions' })).toHaveCount(0); // hidden while editing
+    // The edit box focuses itself (TipTap `autofocus`), a moment after it mounts;
+    // keys pressed before that reach nothing, so type only once it has focus.
+    await expect(mine.locator('[contenteditable="true"]')).toBeFocused();
     await page.keyboard.press('End');
     await page.keyboard.type(' (fixed)');
     await page.keyboard.press('Enter');

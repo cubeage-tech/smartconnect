@@ -1,6 +1,6 @@
 # SmartConnect — Real-time messaging, message isolation and People directory: final report
 
-**Date:** 2026-11-23 (verification completed 2026-11-24) · **Baseline:** `main` @ `ebd4317` · **Changes:** uncommitted, in the working tree (not committed, pushed or deployed)
+**Date:** 2026-11-23, verified 2026-11-24, re-verified in the final production-readiness audit · **Baseline:** `main` @ `ebd4317` · **Changes:** committed by the owner as `16a24e9` (on `cubage/main`); not deployed. Final readiness verdict: `docs/SMARTCONNECT_PRODUCTION_READINESS.md`.
 Details: [investigation](SMARTCONNECT_REALTIME_SECURITY_INVESTIGATION.md) · [remediation tracker](SMARTCONNECT_REALTIME_REMEDIATION_TRACKER.md)
 
 ## 1. Executive summary
@@ -110,6 +110,8 @@ The requirement-by-requirement mapping is in the tracker.
 | `prisma migrate diff` migrations ↔ schema (shadow DB) | ✅ no difference |
 | Backend full suite (`vitest run`), run 1 | ⚠️ 708 passed, 5 failed, 21 skipped. All 5 were 15 s timeouts in `group-dms`, `members-presence` and `socket-revocation`, while the E2E suite ran concurrently (files took 2–3× normal time). Those 3 files re-run alone: ✅ 25/25. |
 | Backend full suite, run 2 (unloaded, fresh DB) | ⚠️ 712 passed, 1 failed, 21 skipped (72 files). The failure is **pre-existing and unrelated** (§6.1). |
+| **Final audit, 2026-11-24** (`16a24e9` + §6.1 fix + Home redesign; each suite alone, fresh DB) | Backend ✅ **713 passed, 0 failed**, 21 skipped (Redis-only). Frontend ✅ **511/511**. Browser E2E ⚠️ **40/41**: one intermittent, network-timing test (`qa-remediation.spec.ts:34`, reaction picker) that passed 2/2 when re-run alone (production readiness §1.6). Type checks, builds, `prisma validate` and both migration diffs ✅. |
+| **Pre-commit hardening, 2026-11-24** (the above + AUD-E2E-1 test fix + AUD-PII-1 privacy fix; each suite alone, fresh DB) | Backend ✅ **716 passed, 0 failed**, 21 skipped (Redis-only), 73 files, including the 3 new `invitation-privacy` tests. Frontend ✅ **511/511** (82 files). Browser E2E ✅ **41/41**. The stabilised `qa-remediation` spec passed 50/50 (`--repeat-each=10`) plus 20/20 for the desktop test alone. Type checks, both builds, `prisma validate`, migrate status, both migration diffs and `git diff --check` ✅. Details: production readiness §1.1, §1.3, §1.6. |
 
 Builds were run with output redirected to a temporary folder, so the git-ignored `frontend/dist` and `backend/dist` were left as they were.
 
@@ -121,13 +123,13 @@ Builds were run with output redirected to a temporary folder, so the git-ignored
 - **What failed:** the test's own setup. `POST /api/auth/signup` answered 503 `SharedWorkspaceMissingError`, because the shared SmartConnect Collab workspace did not exist yet.
 - **Why:** the server creates Collab at startup. In the test suite, only `p2-shared-workspace`, `stage1-hierarchy`, `stage2-team-leads` and `stage3-team-members` create it, as a side effect. On a fresh database, Vitest ran this file first, before any of them. In run 1 the file ran later and passed.
 - **Pre-existing:** run alone on a fresh database, the test fails identically **with the baseline `ebd4317` code**, and with these changes. The file's other 9 tests pass in every run, including the profile e-mail-privacy tests that cover the changed endpoint.
-- **Suggested fix** (not applied; outside this task): add `beforeAll(() => reconcileSharedWorkspace())` to `tests/member-email-privacy.test.ts`, as those four files do.
+- **Fix (applied in the final audit, 2026-11-24):** `beforeAll(() => reconcileSharedWorkspace())` in `tests/member-email-privacy.test.ts`, as those four files do. Test setup only; no expectation changed. The file then passed 10/10 alone on a fresh database, and the full suite 713/713.
 
 Across both full runs, every backend test file passed at least once with these changes, and every failure was explained: 5 load timeouts in run 1 (re-run: 25/25) and this ordering dependency in run 2.
 
 ## 7. Deployment requirements
 
-1. **Review and commit** these changes (nothing was committed or pushed). Deploy backend and frontend **from the same commit**. Local `main` is ahead of `origin` (`origin/main` = `6d5057b`), so confirm which remote and branch Vercel and Render build from. Today the live frontend and backend may come from different commits.
+1. These changes are committed as `16a24e9` and pushed to `cubage/main`; `origin` (`6d5057b`) doesn't have them. Deploy backend and frontend **from the same commit**, and confirm which remote and branch Render and Vercel build from (production readiness §2, B1).
 2. **Production database check (read-only)**, before or right after the backend deploy:
 
    ```sql
