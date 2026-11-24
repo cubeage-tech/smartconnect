@@ -24,6 +24,13 @@ export const useSocket = (token: string | null) => {
     const newSocket = io(socketServerUrl(), {
       auth: { token },
       transports: ['websocket', 'polling'],
+      // WebSocket first, but fall back to HTTP long-polling when the WebSocket
+      // handshake fails (proxies, firewalls, antivirus and some mobile
+      // networks block it while ordinary HTTPS works). Without this,
+      // socket.io-client 4.8 retries WebSocket forever and never tries
+      // polling: REST keeps working, so pages load, but no live event ever
+      // arrives and new messages only show up after a reload.
+      tryAllTransports: true,
       reconnection: true,
       // Previously capped at 5 attempts, after which the app silently stopped
       // receiving messages for good (e.g. across a Render cold start).

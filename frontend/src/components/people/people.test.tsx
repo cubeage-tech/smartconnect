@@ -105,6 +105,75 @@ describe('PeopleDirectory', () => {
   });
 });
 
+describe('People → selecting a person (production incident 2026-11-23)', () => {
+  const directoryWith = (profileResponse: () => Promise<unknown>) => {
+    let calls = 0;
+    api.get.mockImplementation(async (url: string) => {
+      if (url === '/api/workspaces') return { data: [{ id: 'ws', isDefault: false, isOwner: false, organizationRole: null, myRole: 'MEMBER', capabilities: {} }] };
+      if (url === '/api/workspaces/ws/members') return { data: { members: [member('me', 'me'), member('u3', 'zoe')], nextCursor: null } };
+      if (url === '/api/workspaces/ws/members/u3') {
+        calls += 1;
+        return profileResponse();
+      }
+      throw new Error(`unexpected GET ${url}`);
+    });
+    return { profileCalls: () => calls };
+  };
+  const httpError = (status: number, error: string) => Object.assign(new Error(error), { response: { status, data: { error } } });
+
+  it('opens a profile whose optional fields are all missing', async () => {
+    directoryWith(async () => ({
+      data: { id: 'u3', username: 'zoe', email: null, role: 'MEMBER', isOwner: false, joinedAt: '2026-01-01T00:00:00.000Z', displayName: null, title: null, bio: null, timezone: null, presence: null, sharedChannels: [] },
+    }));
+    const onMessage = vi.fn();
+    render(<PeopleDirectory workspaceId="ws" currentUserId="me" onMessage={onMessage} />, { wrapper: WorkspacesProvider });
+    fireEvent.click(await screen.findByRole('button', { name: 'View profile of zoe' }));
+    const dialog = await screen.findByRole('dialog', { name: 'zoe' });
+    expect(await within(dialog).findByText('Offline')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Message' }));
+    expect(onMessage).toHaveBeenCalledWith('u3');
+  });
+
+  it('a server failure is shown with Try again, and Message still opens the conversation', async () => {
+    let fail = true;
+    const { profileCalls } = directoryWith(async () => {
+      if (fail) throw httpError(500, 'Something went wrong on our side. Please try again.');
+      return { data: profile('u3', 'zoe') };
+    });
+    const onMessage = vi.fn();
+    render(<PeopleDirectory workspaceId="ws" currentUserId="me" onMessage={onMessage} />, { wrapper: WorkspacesProvider });
+    fireEvent.click(await screen.findByRole('button', { name: 'View profile of zoe' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Profile' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Something went wrong on our side');
+    fail = false;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('dialog', { name: 'zoe' })).toBeInTheDocument();
+    expect(profileCalls()).toBe(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fail = true;
+    fireEvent.click(screen.getByRole('button', { name: /close/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'View profile of zoe' }));
+    const again = await screen.findByRole('dialog', { name: 'Profile' });
+    await within(again).findByRole('alert');
+    fireEvent.click(within(again).getByRole('button', { name: 'Message' }));
+    expect(onMessage).toHaveBeenCalledWith('u3');
+  });
+
+  it('a person who is not (or no longer) a member gets a controlled error and no Message button', async () => {
+    directoryWith(async () => {
+      throw httpError(404, 'This person is not a member of this workspace.');
+    });
+    render(<PeopleDirectory workspaceId="ws" currentUserId="me" onMessage={vi.fn()} />, { wrapper: WorkspacesProvider });
+    fireEvent.click(await screen.findByRole('button', { name: 'View profile of zoe' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Profile' });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('not a member of this workspace');
+    expect(within(dialog).queryByRole('button', { name: 'Message' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+});
+
 describe('ProfileSettingsModal', () => {
   it('loads and saves profile fields and the read-receipt preference', async () => {
     api.get.mockResolvedValue({ data: { displayName: 'Mia Lee', avatarId: null, title: 'Engineer', bio: null, timezone: null, readReceiptsEnabled: true } });

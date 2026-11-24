@@ -112,7 +112,18 @@ export const getMemberProfile = async (viewer: DirectoryViewer, workspaceId: str
       role: true,
       createdAt: true,
       workspace: { select: { ownerId: true } },
-      user: { select: { id: true, username: true, email: true, profile: true } },
+      // Exactly the profile fields returned below (like listMembers). Loading
+      // the whole row tied every profile card to every UserProfile column: a
+      // database still missing one (e.g. a pending migration) failed every
+      // profile with a 500 while the directory list kept working.
+      user: {
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          profile: { select: { displayName: true, title: true, bio: true, timezone: true } },
+        },
+      },
     },
   });
   if (!membership) throw new HttpError(404, 'This person is not a member of this workspace.');

@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { applyTabSessionUrl, clearStoredToken, readStoredToken, writeStoredToken } from '../lib/devTabSession';
+import { applyTabSessionUrl, clearStoredToken, isTabSessionActive, readStoredToken, writeStoredToken } from '../lib/devTabSession';
+import { isSharedSignInEvent, sharedSignInChange } from '../lib/sharedSignIn';
 import { User } from '../types';
 
 /** Public sign-up fields. No role or permission is ever sent — the server makes every sign-up a Member. */
@@ -124,10 +125,20 @@ export const AuthProvider: React.FC<{
     () => void
   >(() => {});
 
+  // This tab's own session token. Kept in step synchronously (not only on
+  // render) so sign-out and 401 handling always act on this tab's session.
+  const tokenRef = useRef<string | null>(token);
+  tokenRef.current = token;
+
   // Local sign-out only: the server already considers the session over
   // (a 401), or logout() below has asked it to end the session.
   const clearSession = useCallback(() => {
-    clearStoredToken();
+    // The shared sign-in is removed only when it is still this tab's own: if
+    // another tab has meanwhile signed in (possibly as someone else), that
+    // sign-in is not this tab's to end.
+    const stored = readStoredToken();
+    if (!stored || stored === tokenRef.current) clearStoredToken();
+    tokenRef.current = null;
     // Older builds kept a copy of the user object here; nothing reads it.
     localStorage.removeItem('user');
 
@@ -143,7 +154,10 @@ export const AuthProvider: React.FC<{
   // stops working everywhere it may have been copied. Local sign-out never
   // waits for the network.
   const logout = useCallback(() => {
-    const current = readStoredToken();
+    // This tab's session — never whatever another tab last stored, which may
+    // belong to a different account (it used to end that account's session
+    // and leave this one running).
+    const current = tokenRef.current;
     if (current) {
       void axios
         .post('/api/auth/logout', null, { headers: { Authorization: `Bearer ${current}` } })
@@ -153,6 +167,23 @@ export const AuthProvider: React.FC<{
   }, [clearSession]);
 
   logoutRef.current = clearSession;
+
+  // One sign-in per browser profile (lib/sharedSignIn.ts): when another tab
+  // signs in as a different account, or signs out, this tab starts over from
+  // the current sign-in right away. A full page load is the only way to be
+  // sure nothing the previous account loaded (messages, people, the socket)
+  // stays on screen or keeps acting under the new one. (T.37 isolated
+  // development tabs keep their own sign-in and are not affected.)
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (!isSharedSignInEvent(event) || isTabSessionActive()) return;
+      const change = sharedSignInChange(tokenRef.current, readStoredToken());
+      if (change === 'ignore') return;
+      window.location.assign(change === 'signed-out' ? '/login' : '/');
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   // A stale copy of the user object from older builds (never read).
   useEffect(() => {
@@ -272,6 +303,7 @@ export const AuthProvider: React.FC<{
     }
 
     writeStoredToken(newToken);
+    tokenRef.current = newToken;
 
     axios.defaults.headers.common[
       'Authorization'
@@ -342,6 +374,7 @@ export const AuthProvider: React.FC<{
     newUser: User
   ) => {
     writeStoredToken(newToken);
+    tokenRef.current = newToken;
 
     axios.defaults.headers.common[
       'Authorization'

@@ -18,7 +18,7 @@
  */
 
 const DEV_BUILD = import.meta.env.DEV;
-const SHARED_TOKEN_KEY = 'token';
+export const SHARED_TOKEN_KEY = 'token';
 const MODE_KEY = 'smartconnect:dev:tab-session';
 const TAB_TOKEN_KEY = 'smartconnect:dev:tab-token';
 const URL_PARAM = 'tabSession';

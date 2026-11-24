@@ -33,19 +33,31 @@ const statusLabel = (status?: string) =>
 export const ProfileModal = ({ workspaceId, userId, currentUserId, canManage, viewerIsOwner, onClose, onMessage, onRemoved }: ProfileModalProps) => {
   const [profile, setProfile] = useState<MemberProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A failure that may pass (server error, network): offer a retry and keep
+  // "Message" available — starting a conversation does not need the profile.
+  // A 4xx (not a member, invalid id) is final.
+  const [retryable, setRetryable] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [removing, setRemoving] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setError(null);
+    setRetryable(false);
     axios
       .get<MemberProfile>(`/api/workspaces/${workspaceId}/members/${userId}`)
       .then((res) => !cancelled && setProfile(res.data))
-      .catch((err) => !cancelled && setError(err.response?.data?.error ?? 'Could not load this profile.'));
+      .catch((err) => {
+        if (cancelled) return;
+        const status: number | undefined = err.response?.status;
+        setRetryable(status === undefined || status >= 500);
+        setError(err.response?.data?.error ?? 'Could not load this profile.');
+      });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, userId]);
+  }, [workspaceId, userId, attempt]);
 
   const isSelf = userId === currentUserId;
   const mayRemove =
@@ -76,6 +88,26 @@ export const ProfileModal = ({ workspaceId, userId, currentUserId, canManage, vi
         <p className="mb-3 text-sm text-red-600" role="alert">
           {error}
         </p>
+      )}
+      {!profile && error && retryable && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="px-4 py-2 rounded-lg border border-gray-200 text-sm font-semibold hover:bg-gray-50"
+          >
+            Try again
+          </button>
+          {!isSelf && (
+            <button
+              type="button"
+              onClick={() => onMessage(userId)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700"
+            >
+              <MessageSquare size={16} aria-hidden="true" /> Message
+            </button>
+          )}
+        </div>
       )}
       {profile && (
         <div className="space-y-5">
