@@ -12,7 +12,7 @@ import { InviteMemberModal } from './InviteMemberModal';
 import { ProfileSettingsModal } from '../profile/ProfileSettingsModal';
 import { SecuritySettingsModal } from '../profile/SecuritySettingsModal';
 import { Avatar } from '../ui/Avatar';
-import { BrandMark } from '../ui/Brand';
+import { BrandLockup } from '../ui/Brand';
 import { TABLET_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 
 export const Header = ({
@@ -121,10 +121,7 @@ export const Header = ({
         >
           <Menu size={18} aria-hidden="true" />
         </button>
-        <span className="hidden items-center gap-2 md:flex">
-          <BrandMark size={22} />
-          <span className="text-[13px] font-semibold tracking-[-0.01em] text-sidebar-fg">SmartConnect</span>
-        </span>
+        <BrandLockup size="sm" tone="sidebar" className="max-md:hidden" />
       </div>
 
       {/* In-channel / workspace message search (F1) — scoped to the open conversation. */}

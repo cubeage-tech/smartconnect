@@ -117,15 +117,19 @@ test('build files are served as themselves; missing files are a real 404, never 
     [stylesheet!, 'text/css'],
     ['/manifest.webmanifest', 'manifest+json'],
     ['/sw.js', 'javascript'],
-    ['/favicon.svg', 'image/svg+xml'],
-    ['/icons/icon-192.png', 'image/png'],
+    // Branding: favicon, app icon and the logo images the UI shows (derived from the master logo by scripts/generate-brand-assets.mjs).
+    ['/icons/favicon-32.png', 'image/png'],
+    ['/icons/smartconnect-192.png', 'image/png'],
+    ['/brand/smartconnect-logo.png', 'image/png'],
+    ['/brand/smartconnect-mark.png', 'image/png'],
   ];
   for (const [path, type] of served) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(200);
     expect(response.headers()['content-type'], path).toContain(type);
   }
-  for (const path of ['/assets/index-0ld-chunk.js', '/assets/ActivateAccountPage-0ld.js', '/assets/', '/icons/missing.png', '/favicon-old.ico', '/robots.txt']) {
+  // The previous brand's favicon is gone, and is not answered with the HTML page either.
+  for (const path of ['/assets/index-0ld-chunk.js', '/assets/ActivateAccountPage-0ld.js', '/assets/', '/icons/missing.png', '/favicon-old.ico', '/favicon.svg', '/robots.txt']) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(404);
     expect(response.headers()['content-type'] ?? '', path).not.toContain('text/html');

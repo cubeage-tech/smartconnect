@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { ArrowRight, CheckCircle2, Eye, EyeOff, Loader2 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
-import { BrandMark } from '../ui/Brand';
+import { BrandLogo } from '../ui/Brand';
 
 const PASSWORD_MIN = 6;
 
@@ -77,10 +77,7 @@ export const ResetPassword = () => {
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-secondary p-4 font-sans">
       <div className="w-full max-w-[400px] rounded-2xl border border-line bg-surface p-8 shadow-sm animate-fade-in">
-        <div className="mb-6 flex items-center gap-2.5">
-          <BrandMark size={28} />
-          <span className="text-[15px] font-semibold tracking-[-0.01em] text-fg">SmartConnect</span>
-        </div>
+        <BrandLogo className="mb-6" />
         <h2 className="text-[22px] font-semibold tracking-[-0.015em] text-fg">Create a new password</h2>
         <p className="mt-1.5 text-sm text-fg-muted">Choose a password you have not used here before. You will be signed out on your other devices.</p>
 

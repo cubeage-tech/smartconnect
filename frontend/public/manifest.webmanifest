@@ -11,10 +11,9 @@
   "theme_color": "#0f2629",
   "categories": ["business", "productivity", "social"],
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/icons/smartconnect-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/smartconnect-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/smartconnect-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/smartconnect-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

@@ -78,7 +78,7 @@ export const AdminLayout = () => {
       {/* Sidebar (desktop) */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface md:flex" aria-label="Administration">
         <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-4">
-          <BrandMark size={26} />
+          <BrandMark size="md" decorative />
           <div className="min-w-0">
             <p className="text-sm font-semibold leading-tight tracking-[-0.01em]">SmartConnect</p>
             <p className="flex items-center gap-1 text-[11px] leading-tight text-fg-subtle">
@@ -128,7 +128,7 @@ export const AdminLayout = () => {
       <header className="shrink-0 border-b border-line bg-surface pt-[env(safe-area-inset-top)] md:hidden">
         <div className="flex h-12 items-center gap-2 px-3">
           <span className="flex min-w-0 flex-1 items-center gap-2">
-            <BrandMark size={22} />
+            <BrandMark size="sm" />
             <span className="truncate text-sm font-semibold">Administration</span>
           </span>
           <ThemeSwitcher size="sm" iconOnly className="shrink-0" />

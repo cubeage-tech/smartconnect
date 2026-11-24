@@ -6,7 +6,7 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { isInvitationToken } from '../../lib/invitationToken';
 import { type SignupErrors, type SignupInput, passwordStrength, validateResetEmail, validateSignIn, validateSignup } from '../../lib/signupValidation';
-import { BrandMark } from '../ui/Brand';
+import { BrandLockup, BrandLogo } from '../ui/Brand';
 
 interface AuthFormProps {
   // /signup lands here defaulted to the Sign Up tab instead of Login.
@@ -175,10 +175,7 @@ export const AuthForm = ({ startOnSignup = false, presetEmail, startInAdminMode 
     <div className="flex min-h-screen bg-surface-secondary font-sans">
       {/* Brand panel */}
       <aside className="relative hidden w-[44%] max-w-xl flex-col justify-between overflow-hidden bg-sidebar p-10 text-sidebar-fg lg:flex">
-        <span className="inline-flex items-center gap-2.5">
-          <BrandMark size={30} />
-          <span className="text-[15px] font-semibold tracking-[-0.01em] text-white">SmartConnect</span>
-        </span>
+        <BrandLockup size="md" tone="inverse" />
         <div>
           <h1 className="text-[34px] font-semibold leading-[1.15] tracking-[-0.02em] text-white">
             {isAdminMode ? 'Run your company’s workspace.' : 'Where your team’s work happens.'}
@@ -212,10 +209,7 @@ export const AuthForm = ({ startOnSignup = false, presetEmail, startInAdminMode 
       {/* Form */}
       <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-8">
         <div className="w-full max-w-[400px] animate-fade-in">
-          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <BrandMark size={28} />
-            <span className="text-[15px] font-semibold tracking-[-0.01em] text-fg">SmartConnect</span>
-          </div>
+          <BrandLogo className="mb-8 lg:hidden" />
 
           {!isAdminMode && !resetting && (
             <div role="tablist" aria-label="Sign in or sign up" className="mb-7 grid grid-cols-2 gap-1 rounded-lg bg-surface-tertiary p-1">
