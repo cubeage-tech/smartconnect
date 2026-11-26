@@ -9,7 +9,8 @@ import { io, Socket } from 'socket.io-client';
  * own origin, the same rule the REST client uses.
  */
 export const socketServerUrl = (env: { VITE_BACKEND_URL?: string; VITE_API_URL?: string; DEV?: boolean } = import.meta.env) =>
-  env.VITE_BACKEND_URL || env.VITE_API_URL || (env.DEV ? 'http://localhost:3000' : typeof window !== 'undefined' ? window.location.origin : '');
+  // Dev: 127.0.0.1 rather than localhost, for the same IPv6 reason as the /api proxy in vite.config.ts.
+  env.VITE_BACKEND_URL || env.VITE_API_URL || (env.DEV ? 'http://127.0.0.1:3000' : typeof window !== 'undefined' ? window.location.origin : '');
 
 // Network-level failures (retry silently) vs. refusals by the server's
 // authentication check (the session may be over — ask the API).

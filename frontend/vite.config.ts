@@ -21,8 +21,11 @@ import { defineConfig } from 'vite';
         proxy: {
           // Backend dev server: PORT=3000 (backend/.env; default in
           // backend/config/env.ts). Used when VITE_API_URL is unset.
+          // 127.0.0.1, not "localhost": Node resolves localhost to IPv6 (::1)
+          // first, so another dev server on [::1]:3000 (e.g. a Next.js app)
+          // would answer every /api call with its own 404 page.
           '/api': {
-            target: 'http://localhost:3000',
+            target: 'http://127.0.0.1:3000',
             changeOrigin: true,
           },
           
