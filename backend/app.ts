@@ -22,6 +22,7 @@ import { companyOverviewRoutes } from './modules/companyOverview/companyOverview
 import uploadRoutes, { handleUploadErrors } from './modules/uploads/message.routes';
 import usersRoutes from './modules/users/users.routes';
 import tasksRoutes from './modules/tasks/tasks.routes';
+import meetingRoutes from './modules/meetings/meetings.routes';
 import searchRoutes from './modules/search/search.routes';
 import { isShuttingDown } from './lib/lifecycle';
 import { redisHealthy } from './lib/redis';
@@ -127,6 +128,8 @@ app.use('/api/upload', handleUploadErrors);
 app.use('/api/workspaces', workspacesRoutes);
 // T.33: tasks, comments, dependencies, my tasks, workload, reports, work notifications.
 app.use('/api', tasksRoutes);
+// Meeting scheduler: meetings, invitations and responses (call rooms: sockets/calls.handlers.ts).
+app.use('/api', meetingRoutes);
 // T.33: command-palette search (channels, people, projects, tasks, files).
 app.use('/api', searchRoutes);
 

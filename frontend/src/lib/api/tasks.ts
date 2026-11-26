@@ -257,6 +257,8 @@ export interface WorkNotification {
   body: string | null;
   taskId: string | null;
   projectId: string | null;
+  /** Meeting scheduler notifications (invitations, answers, changes, reminders). */
+  meetingId?: string | null;
   actor: UserRef | null;
   readAt: string | null;
   createdAt: string;

@@ -235,6 +235,7 @@ export const workNotificationSelect = {
   body: true,
   taskId: true,
   projectId: true,
+  meetingId: true,
   workspaceId: true,
   readAt: true,
   createdAt: true,
@@ -248,6 +249,8 @@ export const workNotificationView = (row: Prisma.WorkNotificationGetPayload<{ se
   body: row.body,
   taskId: row.taskId,
   projectId: row.projectId,
+  // Meeting scheduler notifications (invitations, responses, changes, reminders).
+  meetingId: row.meetingId,
   workspaceId: row.workspaceId,
   actor: userRef(row.actor),
   readAt: row.readAt,

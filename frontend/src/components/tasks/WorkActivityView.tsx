@@ -64,6 +64,7 @@ export const WorkActivityView = () => {
   const open = (n: WorkNotification) => {
     if (!n.readAt) void markRead([n.id]);
     if (n.projectId && n.taskId) navigate(`/${workspaceId}/projects/${n.projectId}?task=${n.taskId}`);
+    else if (n.meetingId) navigate(`/${workspaceId}/meetings/${n.meetingId}`);
   };
 
   return (

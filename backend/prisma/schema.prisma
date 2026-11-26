@@ -159,6 +159,9 @@ model User {
   taskActivity            TaskActivity[]
   workNotifications       WorkNotification[]     @relation("WorkNotificationRecipient")
   workNotificationsActed  WorkNotification[]     @relation("WorkNotificationActor")
+  // Meeting scheduler: meetings this user organizes, and their invitations.
+  meetingsOrganized       Meeting[]              @relation("MeetingOrganizer")
+  meetingParticipations   MeetingParticipant[]
   createdAt               DateTime               @default(now())
   updatedAt               DateTime               @updatedAt
 }
@@ -239,6 +242,7 @@ model Workspace {
   // T.33: project & task management.
   tasks                 Task[]
   workNotifications     WorkNotification[]
+  meetings              Meeting[]
 
   @@index([organizationId])
   // T.32 (audit L30): foreign keys used by deletes/cascades get an index.
@@ -488,6 +492,7 @@ model Channel {
   creator        User              @relation("UserCreatedChannels", fields: [createdBy], references: [id])
   messages       Message[]
   members        ChannelMember[]
+  meetings       Meeting[]
   workspaceId    String
   // Cascade: the workspace is the tenant boundary — deleting it tears down
   // every channel (and, transitively, every message/member/reaction) scoped
@@ -926,6 +931,10 @@ model WorkNotification {
   project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   taskId      String?
   task        Task?     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // Meeting scheduler: invitations, responses, changes and reminders reuse this
+  // feed (and its live work:notification push) instead of a second one.
+  meetingId   String?
+  meeting     Meeting?  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   actorId     String?
   actor       User?     @relation("WorkNotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
   type        String    @db.VarChar(40)
@@ -936,7 +945,110 @@ model WorkNotification {
 
   @@index([userId, workspaceId, readAt, createdAt])
   @@index([taskId])
+  @@index([meetingId])
   @@index([projectId])
   @@index([actorId])
   @@index([workspaceId])
+}
+
+// ── Meeting scheduler ─────────────────────────────────────────────────────
+// A meeting belongs to one workspace (the tenant boundary) and, optionally, a
+// channel it is about. Times are stored as UTC instants; `timezone` is the
+// IANA zone the organizer scheduled in (display and e-mails). Only the
+// organizer and the participants can see a meeting; the call room is keyed by
+// the meeting id (sockets/calls.handlers.ts verifyCallAccess).
+
+enum MeetingType {
+  VIDEO
+  AUDIO
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  CANCELLED
+  ENDED
+}
+
+// A participant row IS the invitation: its response is the invitation state.
+enum MeetingResponse {
+  PENDING
+  ACCEPTED
+  DECLINED
+  TENTATIVE
+}
+
+enum MeetingRole {
+  ORGANIZER
+  ATTENDEE
+}
+
+model Meeting {
+  id              String        @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  // Optional channel the meeting is about. SetNull: deleting the channel
+  // leaves the meeting in place.
+  channelId       String?
+  channel         Channel?      @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  organizerId     String
+  organizer       User          @relation("MeetingOrganizer", fields: [organizerId], references: [id], onDelete: Cascade)
+  title           String        @db.VarChar(200)
+  description     String?       @db.VarChar(5000)
+  startsAt        DateTime
+  endsAt          DateTime
+  timezone        String        @db.VarChar(64)
+  type            MeetingType   @default(VIDEO)
+  status          MeetingStatus @default(SCHEDULED)
+  // Minutes before the start at which participants are reminded (5, 10, 15,
+  // 30, 60); the MeetingReminder rows are the durable schedule built from it.
+  reminderMinutes Int[]         @default([])
+  cancelledAt     DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  participants      MeetingParticipant[]
+  reminders         MeetingReminder[]
+  workNotifications WorkNotification[]
+
+  @@index([workspaceId, startsAt])
+  @@index([organizerId])
+  @@index([channelId])
+}
+
+model MeetingParticipant {
+  id          String          @id @default(uuid())
+  meetingId   String
+  meeting     Meeting         @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        MeetingRole     @default(ATTENDEE)
+  response    MeetingResponse @default(PENDING)
+  respondedAt DateTime?
+  invitedAt   DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // One invitation per person per meeting (duplicate invitations are refused).
+  @@unique([meetingId, userId])
+  // "My meetings / my invitations": by person, then response.
+  @@index([userId, response])
+}
+
+// Durable reminder schedule: one row per meeting and offset. A worker claims
+// a due row by setting sentAt with a conditional update, so a reminder is
+// sent once even with several instances or after a restart. Rescheduling
+// replaces the unsent rows; cancelling deletes them.
+model MeetingReminder {
+  id            String    @id @default(uuid())
+  meetingId     String
+  meeting       Meeting   @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  minutesBefore Int
+  remindAt      DateTime
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([meetingId, minutesBefore])
+  // The worker's query: unsent rows that are due.
+  @@index([sentAt, remindAt])
 }

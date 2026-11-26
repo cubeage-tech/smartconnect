@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma';
-import { removeUserFromCalls } from './calls.handlers';
+import { removeUserFromCalls, reverifyUserCalls } from './calls.handlers';
 import { getSocketServer } from './registry';
 
 /**
@@ -19,13 +19,16 @@ import { getSocketServer } from './registry';
  * store.
  */
 export const revokeChannelAccess = async (userId: string, channelIds: string[]): Promise<void> => {
-  if (channelIds.length === 0) return;
   const io = getSocketServer();
   if (!io) return;
 
   // Calls first: the call store knows every participant, even one whose
   // socket is on an instance that is slow to answer fetchSockets.
-  await removeUserFromCalls(io, userId, channelIds);
+  if (channelIds.length > 0) await removeUserFromCalls(io, userId, channelIds);
+  // Meeting scheduler: every other call they are in (a meeting's room) is
+  // re-checked against the same rule, so access lost now ends there too.
+  await reverifyUserCalls(io, userId);
+  if (channelIds.length === 0) return;
 
   const sockets = await io.in(`user:${userId}`).fetchSockets();
   if (sockets.length === 0) return;

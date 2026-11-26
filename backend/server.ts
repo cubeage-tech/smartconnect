@@ -8,6 +8,7 @@ import { prisma } from './lib/prisma';
 import { closeRedis, redisEnabled } from './lib/redis';
 import { reconcileSharedWorkspace } from './lib/sharedWorkspace';
 import { startTaskJobs, stopTaskJobs } from './modules/tasks/tasks.jobs';
+import { startMeetingJobs, stopMeetingJobs } from './modules/meetings/meetings.jobs';
 import { createSocketServer, stopSocketBackground } from './sockets';
 
 // Safety net, not the primary fix — the real fix is proper try/catch inside
@@ -61,6 +62,7 @@ const shutdown = (signal: string) => {
 
   stopSocketBackground();
   stopTaskJobs();
+  stopMeetingJobs();
   // io.close() disconnects every socket and closes the HTTP server (no new
   // connections; in-flight requests complete).
   io.close(() => {
@@ -87,6 +89,8 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   startAttachmentSweeper();
   // T.33: overdue task reminders.
   startTaskJobs();
+  // Meeting scheduler: durable meeting reminders (MeetingReminder rows).
+  startMeetingJobs();
   reconcileSharedWorkspace()
     .then((r) => console.log(`SmartConnect Collab ready (${r.channelIds.length} channels; ${r.membersAdded} member(s) added).`))
     .catch((err) => console.error('SmartConnect Collab reconcile failed:', err));

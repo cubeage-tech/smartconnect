@@ -1,5 +1,5 @@
 import { nameIn, usePeopleDirectory, usePersonName } from '../../lib/people';
-import { Archive, Bell, Building2, ChevronDown, ClipboardList, FolderKanban, Hash, Home, LayoutGrid, ListChecks, Lock, MessageSquare, MoreHorizontal, Plus, Settings, Trash2, UserRoundX, Users } from 'lucide-react';
+import { Archive, Bell, Building2, CalendarDays, ChevronDown, ClipboardList, FolderKanban, Hash, Home, LayoutGrid, ListChecks, Lock, MessageSquare, MoreHorizontal, Plus, Settings, Trash2, UserRoundX, Users } from 'lucide-react';
 import { useHierarchy } from '../../hooks/useHierarchy';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -96,6 +96,8 @@ export const Sidebar = ({
     // T.33
     { id: 'projects', label: 'Projects', icon: FolderKanban, badge: 0 },
     { id: 'tasks', label: 'My Tasks', icon: ListChecks, badge: 0 },
+    // Meeting scheduler.
+    { id: 'meetings', label: 'Meetings', icon: CalendarDays, badge: 0 },
     // T.38: the Team Lead dashboard, in workspaces the user manages (never Collab).
     ...(workspace && !workspace.isDefault && workspace.capabilities?.canManage ? [{ id: 'team-tasks', label: 'Team Tasks', icon: ClipboardList, badge: 0 }] : []),
     { id: 'directory', label: 'People', icon: Users, badge: 0, view: 'directory?tab=People' },

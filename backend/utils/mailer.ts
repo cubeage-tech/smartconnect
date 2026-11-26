@@ -193,6 +193,84 @@ export const sendAccountInvitationEmail = async (details: AccountInvitationEmail
   console.log('Account invitation email sent:', data?.id);
 };
 
+// 1c. Meeting scheduler: an invitation, a change, a cancellation or a
+// reminder, sent to ONE participant (never a shared To/Cc list, so nobody
+// learns another invitee's address). Times are shown in the recipient's time
+// zone. Best effort: answers { sent: false } when e-mail is not configured;
+// a provider failure throws, and callers log it without failing the request.
+export type MeetingEmailKind = 'invited' | 'updated' | 'rescheduled' | 'cancelled' | 'reminder';
+
+export interface MeetingEmail {
+  to: string;
+  kind: MeetingEmailKind;
+  title: string;
+  organizerName: string;
+  workspaceName: string;
+  startsAt: Date;
+  endsAt: Date;
+  /** IANA zone the times are shown in (the recipient's, else the meeting's). */
+  timeZone: string;
+  meetingUrl: string;
+  /** Reminders only: minutes until the start. */
+  minutesBefore?: number;
+}
+
+const MEETING_SUBJECTS: Record<MeetingEmailKind, (title: string, minutes?: number) => string> = {
+  invited: (title) => `Invitation: ${title}`,
+  updated: (title) => `Updated: ${title}`,
+  rescheduled: (title) => `New time: ${title}`,
+  cancelled: (title) => `Cancelled: ${title}`,
+  reminder: (title, minutes) => `Reminder: ${title} starts in ${minutes ?? 0} minutes`,
+};
+
+const MEETING_HEADLINES: Record<MeetingEmailKind, (organizer: string) => string> = {
+  invited: (organizer) => `${organizer} invited you to a meeting.`,
+  updated: (organizer) => `${organizer} updated this meeting.`,
+  rescheduled: (organizer) => `${organizer} moved this meeting to a new time. Please respond again.`,
+  cancelled: (organizer) => `${organizer} cancelled this meeting.`,
+  reminder: () => 'Your meeting is starting soon.',
+};
+
+export const formatMeetingTime = (startsAt: Date, endsAt: Date, timeZone: string) => {
+  const day = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(startsAt);
+  const time = new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit' });
+  return `${day}, ${time.format(startsAt)} – ${time.format(endsAt)} (${timeZone})`;
+};
+
+export const sendMeetingEmail = async (email: MeetingEmail): Promise<{ sent: boolean }> => {
+  const settings = emailSettings();
+  if (!settings) return { sent: false };
+
+  const subject = MEETING_SUBJECTS[email.kind](email.title, email.minutesBefore);
+  const headline = MEETING_HEADLINES[email.kind](email.organizerName);
+  const when = formatMeetingTime(email.startsAt, email.endsAt, email.timeZone);
+  const link = escapeHtml(email.meetingUrl);
+  const action = email.kind === 'cancelled' ? 'View meeting' : email.kind === 'reminder' ? 'Join meeting' : 'Respond to invitation';
+  const { data, error } = await sendViaBrevo(settings, {
+    to: email.to,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2 style="color: #111827;">${escapeHtml(email.title)}</h2>
+        <p>${escapeHtml(headline)}</p>
+        <table style="border-collapse: collapse; margin: 16px 0; font-size: 14px;">
+          <tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">When</td><td style="padding: 4px 0;"><strong>${escapeHtml(when)}</strong></td></tr>
+          <tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">Organizer</td><td style="padding: 4px 0;">${escapeHtml(email.organizerName)}</td></tr>
+          <tr><td style="padding: 4px 12px 4px 0; color: #6b7280;">Workspace</td><td style="padding: 4px 0;">${escapeHtml(email.workspaceName)}</td></tr>
+        </table>
+        <p>
+          <a href="${link}" style="display: inline-block; padding: 12px 24px; background-color: #0b7c86; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">${action}</a>
+        </p>
+        <p style="color: #999; font-size: 12px;">Or copy this link: ${link}. You need to be signed in to ${EMAIL_BRAND} to open it.</p>
+      </div>
+    `,
+    text: [headline, '', email.title, `When: ${when}`, `Organizer: ${email.organizerName}`, `Workspace: ${email.workspaceName}`, '', `${action}: ${email.meetingUrl}`].join('\n'),
+  });
+  if (error) throw new Error(`Failed to send the meeting e-mail: ${error.message}`);
+  console.log('Meeting email sent:', data?.id);
+  return { sent: true };
+};
+
 // 2. Send Sign-Up OTP Email Function
 export const sendOtpEmail = async (to: string, code: string) => {
   const settings = emailSettings();

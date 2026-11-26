@@ -2,6 +2,8 @@ import { AlertTriangle, Loader2, Mic, MicOff, Phone, PhoneIncoming, PhoneOff, Sc
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Socket } from 'socket.io-client';
 import { useAuth } from '../../contexts/AuthContext';
+import { errorMessage } from '../../lib/api/http';
+import { endMeeting } from '../../lib/api/meetings';
 import { CallType, displayCallerName, formatCallDuration, isSignalFromCallPeer, MAX_PENDING_CANDIDATES } from '../../lib/callSignalling';
 import { currentIceServers, loadIceConfig } from '../../lib/iceConfig';
 
@@ -21,6 +23,12 @@ interface CallOverlayProps {
   // than let a WebRTC session quietly keep running for a workspace the user
   // has since navigated away from.
   workspaceId: string;
+  /**
+   * Meeting scheduler: set when this call is a scheduled meeting's room
+   * (channelId is then the meeting id). Shows the meeting's title, "Leave
+   * meeting", and for the organizer an "End for everyone" control.
+   */
+  meeting?: { id: string; title: string; isOrganizer: boolean };
 }
 
 /*
@@ -114,7 +122,7 @@ export interface CallMediaChoice {
   videoDeviceId?: string;
 }
 
-export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceId, initialMedia }: CallOverlayProps) => {
+export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceId, initialMedia, meeting }: CallOverlayProps) => {
   const { user } = useAuth();
   // The call effect only needs to know someone is signed in — depending on the
   // user object itself would restart the call whenever it's refreshed.
@@ -751,7 +759,7 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
               ? 'connected'
               : 'connecting';
   const totalTiles = remotePeers.length + 1;
-  const callLabel = callType === 'video' ? 'Video call' : 'Audio call';
+  const callLabel = meeting ? `Meeting · ${meeting.title}` : callType === 'video' ? 'Video call' : 'Audio call';
 
   return (
     // theme-fixed: the call screen is dark by design in both themes (index.css).
@@ -961,18 +969,69 @@ export const CallOverlay = ({ channelId, callType, socket, onEndCall, workspaceI
             {showDevices && <DeviceMenu callType={callType} onSelect={switchDevice} onClose={() => setShowDevices(false)} />}
           </div>
 
+          {meeting?.isOrganizer && <EndForEveryone meetingId={meeting.id} onEnded={handleEndCall} />}
+
           <button
             type="button"
             onClick={handleEndCall}
             className={`${controlClass(true, true)} w-14`}
-            title="End call"
-            aria-label="End call"
+            title={meeting ? 'Leave meeting' : 'End call'}
+            aria-label={meeting ? 'Leave meeting' : 'End call'}
           >
             <PhoneOff size={20} />
           </button>
         </div>
       )}
     </div>
+  );
+};
+
+/**
+ * Meeting organizer: end the meeting for everyone (the server closes the room
+ * and tells every participant). Two steps, inline: the app's confirm dialog
+ * sits below the call screen.
+ */
+const EndForEveryone = ({ meetingId, onEnded }: { meetingId: string; onEnded: () => void }) => {
+  const [armed, setArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 5_000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+  const end = async () => {
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
+    setBusy(true);
+    try {
+      await endMeeting(meetingId);
+      onEnded();
+    } catch (err) {
+      setFailed(errorMessage(err, 'The meeting could not be ended.'));
+      setBusy(false);
+      setArmed(false);
+    }
+  };
+  return (
+    <span className="flex items-center gap-2">
+      {failed && (
+        <span role="alert" className="text-xs text-red-300">
+          {failed}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={end}
+        disabled={busy}
+        aria-live="polite"
+        className={`h-11 rounded-full px-4 text-sm font-semibold transition-colors disabled:opacity-60 ${armed ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-white/10 text-white hover:bg-white/20'}`}
+      >
+        {busy ? 'Ending…' : armed ? 'Confirm: end for everyone' : 'End for everyone'}
+      </button>
+    </span>
   );
 };
 

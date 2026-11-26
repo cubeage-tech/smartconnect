@@ -48,6 +48,10 @@ export interface WorkspaceContextValue {
   // CallOverlay.tsx's workspaceId prop).
   hasActiveCall: boolean;
   endActiveCall: () => void;
+  // Meeting scheduler: opens the existing pre-join lobby, then the existing
+  // call overlay, for a scheduled meeting (its call room is keyed by the
+  // meeting id; nobody is rung). Optional so test harnesses can omit it.
+  joinMeeting?: (meeting: { id: string; title: string; type: 'VIDEO' | 'AUDIO'; isOrganizer: boolean }) => void;
 }
 
 export const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined);

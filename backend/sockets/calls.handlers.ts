@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto';
 import { Server } from 'socket.io';
 import { isUuid } from '../lib/messageInput';
 import { prisma } from '../lib/prisma';
+import { meetingRoomAccess } from '../modules/meetings/meetings.service';
 import { CallParticipant, getCallStore } from './callStore';
+import { getSocketServer } from './registry';
 import { STALE_MS } from './presenceStore';
 import { isChannelMember } from './channelAccess';
 import { AuthenticatedSocket } from './types';
@@ -75,12 +77,14 @@ export const removeUserFromCalls = async (io: Server, userId: string, channelIds
 // that keeps running for as long as both ends leave it running.
 // P2: archived conversations are read-only, so they can't host calls either.
 // Returns the conversation kind when the user may call in it, null otherwise.
-const loadCallChannel = async (userId: string, channelId: string): Promise<{ oneToOne: boolean } | null> => {
+// 'none' when no channel has this id (it may be a meeting's call room).
+const callChannelAccess = async (userId: string, channelId: string): Promise<{ oneToOne: boolean } | 'denied' | 'none'> => {
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     select: { workspaceId: true, isDM: true, isGroupDM: true, archivedAt: true },
   });
-  if (!channel || channel.archivedAt) return null;
+  if (!channel) return 'none';
+  if (channel.archivedAt) return 'denied';
 
   const [channelMember, workspaceMember] = await Promise.all([
     isChannelMember(userId, channelId),
@@ -90,11 +94,56 @@ const loadCallChannel = async (userId: string, channelId: string): Promise<{ one
     }),
   ]);
 
-  return channelMember && !!workspaceMember ? { oneToOne: !!channel.isDM && !channel.isGroupDM } : null;
+  return channelMember && !!workspaceMember ? { oneToOne: !!channel.isDM && !channel.isGroupDM } : 'denied';
 };
 
-const verifyCallAccess = async (userId: string, channelId: string): Promise<boolean> =>
-  (await loadCallChannel(userId, channelId)) !== null;
+const loadCallChannel = async (userId: string, channelId: string): Promise<{ oneToOne: boolean } | null> => {
+  const access = await callChannelAccess(userId, channelId);
+  return typeof access === 'object' ? access : null;
+};
+
+// Meeting scheduler: a scheduled meeting's call room is keyed by the meeting
+// id (meetings are not channels, so ringing — call:initiate — never applies).
+// Access is the meeting's own rule (modules/meetings meetingRoomAccess): a
+// participant who has not declined, still in the workspace, the meeting not
+// cancelled or ended, inside its join window. Every relay below re-checks it
+// exactly as it re-checks channel membership.
+const verifyCallAccess = async (userId: string, channelId: string): Promise<boolean> => {
+  const channel = await callChannelAccess(userId, channelId);
+  // A real channel's own rule is final; only an id that is no channel can be a meeting.
+  if (channel !== 'none') return channel !== 'denied';
+  return (await meetingRoomAccess(userId, channelId))?.canJoin === true;
+};
+
+/**
+ * Re-checks every call `userId` is currently in against verifyCallAccess and
+ * drops them from those they may no longer be in. Called when access is
+ * revoked (sockets/revocation.ts): it covers rooms that are not one of the
+ * revoked channels — a scheduled meeting's room — so losing workspace access
+ * (removed, left, workspace deleted) also ends meeting-room access at once,
+ * not only at the next peer pairing.
+ */
+export const reverifyUserCalls = async (io: Server, userId: string) => {
+  for (const socket of await io.in(`user:${userId}`).fetchSockets()) {
+    for (const key of await calls().channelsOf(socket.id)) {
+      if (!(await verifyCallAccess(userId, key))) await removeFromCall(io, socket.id, key);
+    }
+  }
+};
+
+/**
+ * Meeting scheduler: removes everyone — or one person — from a meeting's call
+ * room, telling their clients why (cancelled, ended, removed from the meeting).
+ */
+export const closeMeetingRoom = async (meetingId: string, reason: string, onlyUserId?: string) => {
+  const io = getSocketServer();
+  if (!io) return;
+  for (const p of await calls().participants(meetingId)) {
+    if (onlyUserId && p.userId !== onlyUserId) continue;
+    io.to(p.socketId).emit('meeting:room-closed', { meetingId, reason });
+    await removeFromCall(io, p.socketId, meetingId);
+  }
+};
 
 // ── Ringing lifecycle (P2 Phase H) ────────────────────────────────────────
 // One ring per conversation, owned by the caller's socket. It ends when the
@@ -320,7 +369,11 @@ export const registerCallHandlers = (io: Server, socket: AuthenticatedSocket) =>
 
     try {
       if (!(await verifyCallAccess(user.id, channelId))) {
-        socket.emit('webrtc:error', { message: 'You are not authorized to join this call.' });
+        // A meeting participant learns why (not open yet, ended, declined…);
+        // anyone else gets the generic answer, so an id reveals nothing.
+        const meeting = (await callChannelAccess(user.id, channelId)) === 'none' ? await meetingRoomAccess(user.id, channelId) : null;
+        const invited = meeting && meeting.reason !== 'You are not invited to this meeting.';
+        socket.emit('webrtc:error', { message: invited ? meeting.reason : 'You are not authorized to join this call.' });
         return;
       }
 

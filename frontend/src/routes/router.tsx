@@ -38,6 +38,8 @@ const ProjectsPage = page(() => import('../pages/projects/ProjectsPage'), 'Proje
 const ProjectPage = page(() => import('../pages/projects/ProjectPage'), 'ProjectPage');
 const MyTasksPage = page(() => import('../pages/projects/MyTasksPage'), 'MyTasksPage');
 const TeamTasksPage = page(() => import('../pages/projects/TeamTasksPage'), 'TeamTasksPage');
+const MeetingsPage = page(() => import('../pages/workspace/MeetingsPage'), 'MeetingsPage');
+const MeetingDetailPage = page(() => import('../pages/workspace/MeetingDetailPage'), 'MeetingDetailPage');
 const ChatsPage = page(() => import('../pages/workspace/ChatsPage'), 'ChatsPage');
 const CallsPage = page(() => import('../pages/workspace/CallsPage'), 'CallsPage');
 
@@ -124,6 +126,9 @@ export const router = createBrowserRouter([
           { path: 'tasks', element: <MyTasksPage /> },
           // T.38: the Team Lead dashboard (lead-only on the server).
           { path: 'team-tasks', element: <TeamTasksPage /> },
+          // Meeting scheduler.
+          { path: 'meetings', element: <MeetingsPage /> },
+          { path: 'meetings/:meetingId', element: <MeetingDetailPage /> },
           // T.39: the phone's Chats and Calls tabs (usable at any width).
           { path: 'chats', element: <ChatsPage /> },
           { path: 'calls', element: <CallsPage /> },

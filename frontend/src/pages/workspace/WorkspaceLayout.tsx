@@ -41,6 +41,7 @@ const activeViewFromPath = (pathname: string, workspaceId: string) => {
   if (rest.startsWith('/projects')) return 'projects';
   if (rest.startsWith('/tasks')) return 'tasks';
   if (rest.startsWith('/team-tasks')) return 'team-tasks';
+  if (rest.startsWith('/meetings')) return 'meetings';
   if (rest.startsWith('/chats')) return 'chats';
   if (rest.startsWith('/calls')) return 'calls';
   if (rest.startsWith('/settings') || rest.startsWith('/organization')) return 'other';
@@ -143,7 +144,16 @@ export const WorkspaceLayout = () => {
   // `outgoing`: this user started the call (rang the conversation), so ending
   // it also cancels the ring and a timeout/decline ends it (P2 Phase H).
   // T.33: a call opens in the pre-join lobby (stage 'lobby'), then goes live.
-  const [activeCall, setActiveCall] = useState<{ channelId: string; callType: 'audio' | 'video'; outgoing?: boolean; stage: 'lobby' | 'live'; media?: CallMediaChoice } | null>(null);
+  // Meeting scheduler: `meeting` is set for a scheduled meeting's room (channelId
+  // is then the meeting id): no ringing, its own title, organizer controls.
+  const [activeCall, setActiveCall] = useState<{
+    channelId: string;
+    callType: 'audio' | 'video';
+    outgoing?: boolean;
+    stage: 'lobby' | 'live';
+    media?: CallMediaChoice;
+    meeting?: { title: string; isOrganizer: boolean };
+  } | null>(null);
   const activeCallRef = useRef(activeCall);
 
   const currentChannelId = channelMatch?.params.channelId;
@@ -249,13 +259,52 @@ export const WorkspaceLayout = () => {
         // Stop ringing everyone else (the server ignores this if the ring
         // already ended or wasn't ours).
         if (current.outgoing) socket?.emit('call:cancel', { channelId: current.channelId });
-      } else if (current && !current.outgoing) {
+      } else if (current && !current.outgoing && !current.meeting) {
         // Answered, then backed out of the lobby: that is a decline.
         socket?.emit('call:decline', { channelId: current.channelId });
       }
       return null;
     });
   }, [socket]);
+
+  // Meeting scheduler: a scheduled meeting opens in the same lobby and call
+  // overlay as any call. One call at a time.
+  const joinMeeting = useCallback((meeting: { id: string; title: string; type: 'VIDEO' | 'AUDIO'; isOrganizer: boolean }) => {
+    if (activeCallRef.current) {
+      toast.info(activeCallRef.current.channelId === meeting.id ? 'You are already in this meeting.' : 'Leave your current call before joining the meeting.');
+      return;
+    }
+    setActiveCall({
+      channelId: meeting.id,
+      callType: meeting.type === 'AUDIO' ? 'audio' : 'video',
+      outgoing: false,
+      stage: 'lobby',
+      meeting: { title: meeting.title, isOrganizer: meeting.isOrganizer },
+    });
+  }, []);
+
+  // The server closed a meeting room this person is in (cancelled, ended, or
+  // they were removed), and reminders shortly before a meeting starts.
+  useEffect(() => {
+    if (!socket) return;
+    const onRoomClosed = (data: { meetingId?: unknown; reason?: unknown }) => {
+      if (typeof data?.meetingId !== 'string' || activeCallRef.current?.channelId !== data.meetingId) return;
+      toast.info(typeof data.reason === 'string' ? data.reason : 'This meeting has ended.');
+      setActiveCall(null);
+    };
+    const onReminder = (data: { meetingId?: unknown; workspaceId?: unknown; title?: unknown; minutesLeft?: unknown }) => {
+      if (typeof data?.meetingId !== 'string' || typeof data.workspaceId !== 'string' || typeof data.title !== 'string') return;
+      const minutes = typeof data.minutesLeft === 'number' ? data.minutesLeft : null;
+      const path = `/${data.workspaceId}/meetings/${data.meetingId}`;
+      toast.info(`${data.title} starts ${minutes ? `in ${minutes} minute${minutes === 1 ? '' : 's'}` : 'soon'}.`, { onClick: () => navigate(path) });
+    };
+    socket.on('meeting:room-closed', onRoomClosed);
+    socket.on('meeting:reminder', onReminder);
+    return () => {
+      socket.off('meeting:room-closed', onRoomClosed);
+      socket.off('meeting:reminder', onReminder);
+    };
+  }, [socket, navigate]);
 
   // P2 Phase H: ringing lifecycle. A ring that ends (cancelled, timed out,
   // declined in a 1:1 DM, answered on another device) dismisses the banner;
@@ -654,6 +703,7 @@ export const WorkspaceLayout = () => {
     startCall,
     hasActiveCall: !!activeCall,
     endActiveCall,
+    joinMeeting,
   };
 
   const currentChannel = findConversation(channels, dms, currentChannelId);
@@ -683,8 +733,12 @@ export const WorkspaceLayout = () => {
         {activeCall?.stage === 'lobby' && (
           <CallLobby
             callType={activeCall.callType}
-            title={`${activeCall.callType === 'video' ? 'Video' : 'Audio'} call · ${findConversation(channels, dms, activeCall.channelId)?.name ?? 'conversation'}`}
-            joinLabel={activeCall.outgoing ? 'Start call' : 'Join call'}
+            title={
+              activeCall.meeting
+                ? `${activeCall.callType === 'video' ? 'Video' : 'Audio'} meeting · ${activeCall.meeting.title}`
+                : `${activeCall.callType === 'video' ? 'Video' : 'Audio'} call · ${findConversation(channels, dms, activeCall.channelId)?.name ?? 'conversation'}`
+            }
+            joinLabel={activeCall.meeting ? 'Join meeting' : activeCall.outgoing ? 'Start call' : 'Join call'}
             onJoin={joinActiveCall}
             onCancel={endActiveCall}
           />
@@ -698,6 +752,7 @@ export const WorkspaceLayout = () => {
             onEndCall={endActiveCall}
             workspaceId={workspaceId}
             initialMedia={activeCall.media}
+            meeting={activeCall.meeting ? { id: activeCall.channelId, title: activeCall.meeting.title, isOrganizer: activeCall.meeting.isOrganizer } : undefined}
           />
         )}
 

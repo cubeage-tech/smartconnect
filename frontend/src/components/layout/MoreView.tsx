@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Settings, Bell, MessageSquare, LogOut, ChevronRight, Globe, Building2, FolderKanban, ListChecks } from 'lucide-react';
+import { Settings, Bell, MessageSquare, LogOut, ChevronRight, Globe, Building2, FolderKanban, ListChecks, CalendarDays } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useWorkspace } from '../../pages/workspace/WorkspaceContext';
 import { useWorkspaces } from '../../pages/workspace/WorkspacesProvider';
@@ -28,6 +28,7 @@ export const MoreView = ({ onViewChange, header }: MoreViewProps) => {
         { label: 'Directory', icon: Globe, action: () => onViewChange('directory') },
         { label: 'Projects', icon: FolderKanban, action: () => onViewChange('projects') },
         { label: 'My tasks', icon: ListChecks, action: () => onViewChange('tasks') },
+        { label: 'Meetings', icon: CalendarDays, action: () => onViewChange('meetings') },
       ]
     },
     ...(canManage
