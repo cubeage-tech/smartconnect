@@ -15,6 +15,9 @@ import { useConnectionStatus, useSocket } from '../../hooks/useSocket';
 import { activityApi } from '../../lib/api';
 import { IncomingCall, parseCallDeclined, parseIncomingCall, parseRingEnded } from '../../lib/callSignalling';
 import { htmlToText, truncate } from '../../lib/messages';
+import { markAlertSeen, markRingHandled, onRingHandledElsewhere, playAlert, ringCategoryFor, setInCall, setSoundUser, startRinging, stopRinging } from '../../lib/sounds/coordinator';
+import { installUnlock } from '../../lib/sounds/engine';
+import { clearSoundPreferences, loadSoundPreferences } from '../../lib/sounds/preferences';
 import { applyIncomingMessage, applyReadState, ReadStateMap, toReadStateMap, unreadCountsOf } from '../../lib/unread';
 import { Channel, ReadState, User } from '../../types';
 import { findConversation, WorkspaceContext, WorkspaceContextValue } from './WorkspaceContext';
@@ -157,9 +160,33 @@ export const WorkspaceLayout = () => {
   const activeCallRef = useRef(activeCall);
 
   const currentChannelId = channelMatch?.params.channelId;
+  const currentChannelIdRef = useRef(currentChannelId);
+  currentChannelIdRef.current = currentChannelId;
+  // The channel list is in (a workspace always has at least #general), so a
+  // message from a conversation that isn't in it is a DM that just started.
+  const channelListReadyRef = useRef(false);
+  channelListReadyRef.current = channelsFor === workspaceId && channels.length > 0;
 
   useEffect(() => {
     activeCallRef.current = activeCall;
+  }, [activeCall]);
+
+  // Personal call and notification sounds (lib/sounds): this user's
+  // preferences, audio unlocked on the first click or key press (browser
+  // autoplay rules), and nothing left ringing after sign-out.
+  useEffect(() => {
+    if (!user?.id) return;
+    setSoundUser(user.id);
+    installUnlock();
+    void loadSoundPreferences(user.id);
+    return () => {
+      setSoundUser(null);
+      clearSoundPreferences();
+    };
+  }, [user?.id]);
+  // In a call or its lobby: no ringtone or alert plays (in any of this user's tabs).
+  useEffect(() => {
+    setInCall(!!activeCall);
   }, [activeCall]);
 
   // T.32 (audit FE-6): responses for a workspace the user has already left
@@ -297,6 +324,7 @@ export const WorkspaceLayout = () => {
       const minutes = typeof data.minutesLeft === 'number' ? data.minutesLeft : null;
       const path = `/${data.workspaceId}/meetings/${data.meetingId}`;
       toast.info(`${data.title} starts ${minutes ? `in ${minutes} minute${minutes === 1 ? '' : 's'}` : 'soon'}.`, { onClick: () => navigate(path) });
+      playAlert('meetingReminder', `reminder:${data.meetingId}:${minutes ?? 'soon'}`);
     };
     socket.on('meeting:room-closed', onRoomClosed);
     socket.on('meeting:reminder', onReminder);
@@ -345,6 +373,25 @@ export const WorkspaceLayout = () => {
     const timer = setTimeout(() => setIncomingCall(null), 60_000);
     return () => clearTimeout(timer);
   }, [incomingCall]);
+
+  // The personal ringtone lives exactly as long as the banner: accept,
+  // decline, cancel, timeout, an answer on another device, or the fallback
+  // above all remove the banner and so stop it. 1:1 audio, 1:1 video and
+  // group calls each have their own (lib/sounds).
+  useEffect(() => {
+    if (!incomingCall) return;
+    const conversation = findConversation(channelsRef.current, dmsRef.current, incomingCall.channelId);
+    const oneToOne = incomingCall.oneToOne ?? (!!conversation?.isDM && !conversation.isGroupDM);
+    startRinging(incomingCall.channelId, ringCategoryFor(incomingCall.callType, oneToOne));
+    return () => stopRinging(incomingCall.channelId);
+  }, [incomingCall]);
+  // Connection lost: the ring may end without us hearing about it, so stop
+  // the sound (the banner stays until it ends or the fallback clears it).
+  useEffect(() => {
+    if (connectionStatus !== 'connected') stopRinging();
+  }, [connectionStatus]);
+  // Accepted or declined in another of this user's tabs: dismiss it here too.
+  useEffect(() => onRingHandledElsewhere((key) => setIncomingCall((current) => (current?.channelId === key ? null : current))), []);
 
   const fetchReadState = useCallback(() => {
     if (!token || !workspaceId) return;
@@ -508,6 +555,13 @@ export const WorkspaceLayout = () => {
         requestedUnknown.add(msg.channelId);
         fetchDMs();
       }
+      // A direct message from someone else: one tab chimes, unless the person
+      // is looking at that conversation.
+      if (msg.senderId !== user?.id && !msg.parentId && (knownDM || (!knownChannel && channelListReadyRef.current))) {
+        const eventId = `message:${msg.id}`;
+        if (msg.channelId === currentChannelId && document.visibilityState === 'visible' && document.hasFocus()) markAlertSeen(eventId);
+        else playAlert('directMessage', eventId);
+      }
       if (msg.parentId) return; // thread replies don't bump channel unread counts
       if (knownDM) {
         const text = htmlToText(msg.content);
@@ -652,8 +706,16 @@ export const WorkspaceLayout = () => {
   }, [workspaceId, token]);
   useEffect(() => {
     if (!socket || !workspaceId) return;
-    const onNew = (n: { workspaceId?: string; isRead?: boolean } | null) => {
+    const onNew = (n: { workspaceId?: string; isRead?: boolean; type?: string; channel?: { id?: string }; message?: { id?: string } } | null) => {
       if (n?.workspaceId === workspaceId && !n.isRead) setActivityUnread((count) => count + 1);
+      // @mention (any workspace): the mention sound, once per message (a DM
+      // that mentions you only makes the direct-message sound).
+      if (n?.type === 'MENTION' && !n.isRead && typeof n.message?.id === 'string') {
+        const eventId = `message:${n.message.id}`;
+        const looking = n.channel?.id === currentChannelIdRef.current && document.visibilityState === 'visible' && document.hasFocus();
+        if (looking) markAlertSeen(eventId);
+        else playAlert('mention', eventId);
+      }
     };
     const onReady = () => reloadActivityRef.current();
     socket.on('notification:new', onNew);
@@ -720,10 +782,12 @@ export const WorkspaceLayout = () => {
             callerName={incomingCall.callerName}
             callType={incomingCall.callType}
             onAccept={() => {
+              markRingHandled(incomingCall.channelId);
               setActiveCall({ channelId: incomingCall.channelId, callType: incomingCall.callType, outgoing: false, stage: 'lobby' });
               setIncomingCall(null);
             }}
             onDecline={() => {
+              markRingHandled(incomingCall.channelId);
               socket?.emit('call:decline', { channelId: incomingCall.channelId });
               setIncomingCall(null);
             }}

@@ -292,7 +292,7 @@ describe('Incoming-call ring validation (FA-RT-02)', () => {
     // What the fixed client sends: no caller name at all ("missing caller name").
     const { errors, rings } = await ringAll(alice, bob, [{ channelId: CH_A, callType: 'video' }]);
 
-    const expected = { channelId: CH_A, callerName: 'alice', callType: 'video', from: 'alice' };
+    const expected = { channelId: CH_A, callerName: 'alice', callType: 'video', from: 'alice', oneToOne: false };
     expect(errors).toEqual([]);
     expect(rings).toEqual([expected]);
     expect(await atCarol).toEqual([expected]);
@@ -305,7 +305,7 @@ describe('Incoming-call ring validation (FA-RT-02)', () => {
     const bob = await connect('bob');
     const { errors, rings } = await ringAll(alice, bob, [{ channelId: CH_A, callerName: 'alice', callType: 'audio' }]);
     expect(errors).toEqual([]);
-    expect(rings).toEqual([{ channelId: CH_A, callerName: 'alice', callType: 'audio', from: 'alice' }]);
+    expect(rings).toEqual([{ channelId: CH_A, callerName: 'alice', callType: 'audio', from: 'alice', oneToOne: false }]);
   });
 
   it('spoofed caller identity: another name, or a client-supplied from/userId, is refused', async () => {
@@ -406,11 +406,11 @@ describe('Incoming-call ring validation (FA-RT-02)', () => {
     const bob = await connect('bob');
     const long = await ringAll(longName, bob, [{ channelId: CH_A, callType: 'audio' }]);
     expect(long.errors).toEqual([]);
-    expect(long.rings).toEqual([{ channelId: CH_A, callerName: 'A'.repeat(80), callType: 'audio', from: 'alice' }]);
+    expect(long.rings).toEqual([{ channelId: CH_A, callerName: 'A'.repeat(80), callType: 'audio', from: 'alice', oneToOne: false }]);
 
     const blank = await connect('carol', '   ');
     const empty = await ringAll(blank, bob, [{ channelId: CH_A, callType: 'video' }]);
-    expect(empty.rings).toEqual([{ channelId: CH_A, callerName: 'Someone', callType: 'video', from: 'carol' }]);
+    expect(empty.rings).toEqual([{ channelId: CH_A, callerName: 'Someone', callType: 'video', from: 'carol', oneToOne: false }]);
   });
 
   it('valid existing call acceptance: the rung member joins and the WebRTC handshake relays as before', async () => {

@@ -687,6 +687,9 @@ model UserProfile {
   // Reciprocal, like Microsoft Teams: when off, the user neither sends read
   // receipts nor sees anyone else's.
   readReceiptsEnabled Boolean     @default(true)
+  // Personal call and notification sounds (modules/users/soundPreferences.ts).
+  // Null = the defaults. Read and written only via /api/users/me/sound-preferences.
+  soundPreferences    Json?
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
 }

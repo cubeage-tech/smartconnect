@@ -1,5 +1,5 @@
 import { usePersonName } from '../../lib/people';
-import { Command, LogOut, Mail, Menu, ShieldCheck, User as UserIcon, UserPlus } from 'lucide-react';
+import { BellRing, Command, LogOut, Mail, Menu, ShieldCheck, User as UserIcon, UserPlus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { requestMessageFocusAfterNavigation } from '../../lib/messageFocus';
@@ -11,6 +11,7 @@ import { ChannelSearch, SearchScope } from './ChannelSearch';
 import { InviteMemberModal } from './InviteMemberModal';
 import { ProfileSettingsModal } from '../profile/ProfileSettingsModal';
 import { SecuritySettingsModal } from '../profile/SecuritySettingsModal';
+import { SoundSettingsModal } from '../profile/SoundSettingsModal';
 import { Avatar } from '../ui/Avatar';
 import { BrandLockup } from '../ui/Brand';
 import { TABLET_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
@@ -53,6 +54,7 @@ export const Header = ({
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  const [showSounds, setShowSounds] = useState(false);
   const [userStatus, setUserStatus] = useState<'active' | 'away' | 'in_meeting'>('active');
   const [statusEmoji, setStatusEmoji] = useState('🟢');
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -224,6 +226,14 @@ export const Header = ({
               <button
                 type="button"
                 role="menuitem"
+                onClick={() => { setShowSounds(true); setIsDropdownOpen(false); }}
+                className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-tertiary hover:text-fg"
+              >
+                <BellRing size={15} aria-hidden="true" /> Call & notification sounds
+              </button>
+              <button
+                type="button"
+                role="menuitem"
                 onClick={() => { setShowSecurity(true); setIsDropdownOpen(false); }}
                 className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-fg-muted transition-colors hover:bg-surface-tertiary hover:text-fg"
               >
@@ -269,6 +279,7 @@ export const Header = ({
 
       {showProfileSettings && <ProfileSettingsModal onClose={() => setShowProfileSettings(false)} />}
       {showSecurity && <SecuritySettingsModal onClose={() => setShowSecurity(false)} />}
+      {showSounds && <SoundSettingsModal onClose={() => setShowSounds(false)} />}
 
       <InviteMemberModal
         isOpen={showInviteModal}

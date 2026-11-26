@@ -38,6 +38,8 @@ export interface IncomingCall {
   channelId: string;
   callerName: string;
   callType: CallType;
+  /** A 1:1 conversation (server-derived); absent from older servers. Picks the ringtone. */
+  oneToOne?: boolean;
 }
 
 /** Same cap the server applies to the caller name it derives (calls.handlers.ts). */
@@ -57,10 +59,10 @@ export const displayCallerName = (value: unknown): string =>
  */
 export const parseIncomingCall = (data: unknown): IncomingCall | null => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
-  const { channelId, callerName, callType } = data as Record<string, unknown>;
+  const { channelId, callerName, callType, oneToOne } = data as Record<string, unknown>;
   if (typeof channelId !== 'string' || !channelId || channelId.length > MAX_CHANNEL_ID_LENGTH) return null;
   if (!isCallType(callType)) return null;
-  return { channelId, callType, callerName: displayCallerName(callerName) };
+  return { channelId, callType, callerName: displayCallerName(callerName), ...(typeof oneToOne === 'boolean' ? { oneToOne } : {}) };
 };
 
 // ── Ringing lifecycle (P2 Phase H) ────────────────────────────────────────

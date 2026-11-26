@@ -319,6 +319,8 @@ export const registerCallHandlers = (io: Server, socket: AuthenticatedSocket) =>
         callerName: callerDisplayName(user.username),
         callType: ring.callType,
         from: user.id,
+        // Lets the callee pick the one-to-one or group ringtone (lib/sounds).
+        oneToOne: callChannel.oneToOne,
       });
     } catch (err) {
       console.error('call:initiate failed:', err);

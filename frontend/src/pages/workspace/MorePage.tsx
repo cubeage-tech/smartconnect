@@ -1,6 +1,8 @@
-import { ArrowLeftRight, ClipboardList, LogOut } from 'lucide-react';
+import { ArrowLeftRight, BellRing, ClipboardList, LogOut } from 'lucide-react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MoreView } from '../../components/layout/MoreView';
+import { SoundSettingsModal } from '../../components/profile/SoundSettingsModal';
 import { Avatar } from '../../components/ui/Avatar';
 import { usePersonName } from '../../lib/people';
 import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
@@ -20,6 +22,7 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
   const { workspaceId } = useWorkspace();
   const workspace = useWorkspaces().getWorkspace(workspaceId);
   const leads = !!workspace && !workspace.isDefault && !!workspace.capabilities?.canManage;
+  const [showSounds, setShowSounds] = useState(false);
   const row = 'flex min-h-12 w-full select-none items-center gap-3 px-4 text-left text-[15px] text-fg active:bg-surface-tertiary';
   return (
     <div className="-mx-2 mb-8 space-y-4 md:hidden">
@@ -42,6 +45,9 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
           <span className="shrink-0 whitespace-nowrap">Switch workspace</span>
           <span className="ml-auto min-w-0 truncate text-sm text-fg-subtle">{workspace?.name}</span>
         </button>
+        <button type="button" className={`${row} border-t border-line`} onClick={() => setShowSounds(true)}>
+          <BellRing size={19} aria-hidden="true" /> Call & notification sounds
+        </button>
         {leads && (
           <button type="button" className={`${row} border-t border-line`} onClick={() => onNavigate('team-tasks')}>
             <ClipboardList size={19} aria-hidden="true" /> Team tasks
@@ -51,6 +57,7 @@ const PhoneAccountPanel = ({ onNavigate }: { onNavigate: (view: string) => void 
           <LogOut size={19} aria-hidden="true" /> Sign out
         </button>
       </div>
+      {showSounds && <SoundSettingsModal onClose={() => setShowSounds(false)} />}
     </div>
   );
 };
